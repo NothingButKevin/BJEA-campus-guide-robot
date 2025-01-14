@@ -41,5 +41,6 @@ Scripts and program files for the robot used to guide visitors and those unfamil
 ## Acknowledgments
 ### Contributors
 [TODO]
+
 ### Open-Source Library
-[TODO]
+- [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) by ggerganov and other contributors, for speech recognition
