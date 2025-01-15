@@ -1,3 +1,5 @@
 numpy==2.2.1
+rapidfuzz==3.11.0
 sounddevice==0.5.1
-whispercpp==0.0.17
+whispercpp==0.0.17 #not necessarily needed because it is already included in the src folder
+xpinyin==0.7.6

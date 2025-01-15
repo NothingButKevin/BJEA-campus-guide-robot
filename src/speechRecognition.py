@@ -18,7 +18,7 @@ def record_until_silence(output_path, silence_threshold=500, silence_duration=2.
     """
     print("Recording... Speak into the microphone.")
     frames = []
-    silent_chunks = 0
+    silent_chunks = -int(rate / chunk * 3) # 给用户 3 秒的缓冲时间，以免刚开始来不及说话就结束录音
     max_silent_chunks = int(rate / chunk * silence_duration)
     stop_recording = False  # 标志位
 
@@ -62,7 +62,7 @@ def record_until_silence(output_path, silence_threshold=500, silence_duration=2.
 
     print(f"Recording saved to {output_path}")
 
-def ASR(output_path, silence_threshold=500, silence_duration=2.5):
+def ASR(output_path="cache/output.wav", silence_threshold=500, silence_duration=2.5):
     record_until_silence(output_path, silence_threshold, silence_duration)
     result = w.transcribe(output_path)
     return ''.join(w.extract_text(result))
