@@ -62,7 +62,7 @@ def record_until_silence(output_path, silence_threshold=500, silence_duration=2.
 
     print(f"Recording saved to {output_path}")
 
-def ASR(output_path, silence_threshold=500, silence_duration=2.5):
+def ASR(output_path="cache/output.wav", silence_threshold=500, silence_duration=2.5):
     record_until_silence(output_path, silence_threshold, silence_duration)
     result = w.transcribe(output_path)
     return ''.join(w.extract_text(result))
