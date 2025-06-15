@@ -1,59 +1,73 @@
 import json
 from rapidfuzz import process, fuzz
 from xpinyin import Pinyin
+import os
 
-# 创建拼音转换器
+# 初始化拼音转换器
 p = Pinyin()
 
-# 从 JSON 文件读取数据
+# === 1. 数据加载与预处理 ===
 def load_data(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data
 
-# 将 JSON 数据中的每个值都转换为拼音
-def prepare_data(data):
+def prepare_pinyin_data(data):
     pinyin_data = {}
     for key, values in data.items():
-        # 将每个地点的所有别名转换为拼音
         pinyin_values = ["".join(p.get_pinyin(val, "").split("-")) for val in values]
         pinyin_data[key] = pinyin_values
     return pinyin_data
 
-# 核心匹配逻辑
-def find_location(user_input, pinyin_data, score_threshold=80, score_gap=10):
-    # 将用户输入转换为拼音
+# === 2. 全量拼音词表 & 映射关系构建（用于批量匹配） ===
+def build_flat_index(pinyin_data):
+    flat_list = []
+    key_map = []
+    for key, values in pinyin_data.items():
+        for val in values:
+            flat_list.append(val)
+            key_map.append(key)
+    return flat_list, key_map
+
+# === 3. 匹配函数（使用快速批量相似度计算） ===
+def find_best_match(user_input, flat_pinyin_list, key_map, score_threshold=80, score_gap=10):
     user_pinyin = "".join(p.get_pinyin(user_input, "").split("-"))
-    # 存储每个地点的最高匹配分数
-    scores = []
-    
-    for key, pinyin_values in pinyin_data.items():
-        # 获取用户输入与当前地点拼音别名的最高相似度
-        best_match = process.extractOne(user_pinyin, pinyin_values, scorer=fuzz.partial_ratio)
-        if best_match:  # 确保有匹配结果
-            scores.append((key, best_match[1]))
-    
-    # 按分数降序排序
-    scores.sort(key=lambda x: x[1], reverse=True)
-    
-    if scores and scores[0][1] >= score_threshold:
-        # 检查最高分与次高分的差距是否足够大
-        if len(scores) > 1 and scores[0][1] - scores[1][1] < score_gap:
+
+    # 批量计算所有相似度
+    scores = process.cdist([user_pinyin], flat_pinyin_list, scorer=fuzz.partial_ratio, workers=1)[0]
+
+    # 聚合到 key 层面，保留每个 key 的最高分
+    score_by_key = {}
+    for i, score in enumerate(scores):
+        key = key_map[i]
+        if key not in score_by_key or score > score_by_key[key]:
+            score_by_key[key] = score
+
+    # 排序并筛选
+    sorted_scores = sorted(score_by_key.items(), key=lambda x: x[1], reverse=True)
+
+    if sorted_scores and sorted_scores[0][1] >= score_threshold:
+        if len(sorted_scores) > 1 and sorted_scores[0][1] - sorted_scores[1][1] < score_gap:
             return "none"
-        return scores[0][0]
+        return sorted_scores[0][0]
     
     return "none"
 
-# 主程序入口
-def keywords_mapping(user_input, data_file_path="resources/locationKeywords.json", score_threshold=80, score_gap=10):
-    # 加载数据
-    data = load_data(data_file_path)
-    # 准备数据
-    pinyin_data = prepare_data(data)
-    # 匹配地点
-    location = find_location(user_input, pinyin_data, score_threshold, score_gap)
-    return location
+# === 4. 主接口 ===
+class KeywordMatcher:
+    def __init__(self, data_file_path):
+        self.data_file_path = data_file_path
+        self.data = load_data(self.data_file_path)
+        self.pinyin_data = prepare_pinyin_data(self.data)
+        self.flat_list, self.key_map = build_flat_index(self.pinyin_data)
 
+    def match(self, user_input, score_threshold=80, score_gap=10):
+        return find_best_match(user_input, self.flat_list, self.key_map, score_threshold, score_gap)
+
+# === 5. 命令行测试入口 ===
 if __name__ == "__main__":
-    # 测试用例
-    print(keywords_mapping(input(), "resources/locationKeywords.json"))
+    matcher = KeywordMatcher("resources/locationKeywords.json")
+    while True:
+        user_input = input("请输入地点关键词：")
+        result = matcher.match(user_input)
+        print(f"匹配结果：{result}")
