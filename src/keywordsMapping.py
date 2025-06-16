@@ -70,4 +70,7 @@ if __name__ == "__main__":
     while True:
         user_input = input("请输入地点关键词：")
         result = matcher.match(user_input)
-        print(f"匹配结果：{result}")
+        if result == "none":
+            print("没有匹配结果，请重新输入")
+        else:
+            print(f"匹配结果：{result}")
