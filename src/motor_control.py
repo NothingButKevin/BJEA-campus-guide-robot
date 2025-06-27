@@ -1,78 +1,35 @@
 import RPi.GPIO as GPIO
 import time
 
-# 设置 GPIO 模式为 BCM（GPIO编号）
+# 设置 GPIO 模式
 GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
 
-# 左轮
-LEFT_IN1 = 17
-LEFT_IN2 = 18
+# 定义电机引脚
+motor_pins = [17, 18, 22, 23]
 
-# 右轮
-RIGHT_IN1 = 22
-RIGHT_IN2 = 23
+# 设置引脚为输出
+for pin in motor_pins:
+    GPIO.setup(pin, GPIO.OUT)
 
-# 设置为输出模式
-GPIO.setup(LEFT_IN1, GPIO.OUT)
-GPIO.setup(LEFT_IN2, GPIO.OUT)
-GPIO.setup(RIGHT_IN1, GPIO.OUT)
-GPIO.setup(RIGHT_IN2, GPIO.OUT)
+# 设置 PWM 信号（频率 100Hz）
+pwm_left_forward = GPIO.PWM(17, 100)
+pwm_left_backward = GPIO.PWM(18, 100)
+pwm_right_forward = GPIO.PWM(22, 100)
+pwm_right_backward = GPIO.PWM(23, 100)
 
-# 定义控制函数
-def stop():
-    GPIO.output(LEFT_IN1, GPIO.LOW)
-    GPIO.output(LEFT_IN2, GPIO.LOW)
-    GPIO.output(RIGHT_IN1, GPIO.LOW)
-    GPIO.output(RIGHT_IN2, GPIO.LOW)
+# 启动 PWM，初始占空比为 0（不转）
+pwm_left_forward.start(0)
+pwm_left_backward.start(0)
+pwm_right_forward.start(0)
+pwm_right_backward.start(0)
 
-def forward():
-    GPIO.output(LEFT_IN1, GPIO.HIGH)
-    GPIO.output(LEFT_IN2, GPIO.LOW)
-    GPIO.output(RIGHT_IN1, GPIO.HIGH)
-    GPIO.output(RIGHT_IN2, GPIO.LOW)
+# 向前转，速度为 70%
+pwm_left_forward.ChangeDutyCycle(70)
+pwm_right_forward.ChangeDutyCycle(70)
+time.sleep(2)
 
-def backward():
-    GPIO.output(LEFT_IN1, GPIO.LOW)
-    GPIO.output(LEFT_IN2, GPIO.HIGH)
-    GPIO.output(RIGHT_IN1, GPIO.LOW)
-    GPIO.output(RIGHT_IN2, GPIO.HIGH)
+# 停止所有转动
+for pwm in [pwm_left_forward, pwm_left_backward, pwm_right_forward, pwm_right_backward]:
+    pwm.ChangeDutyCycle(0)
 
-def turn_left():
-    GPIO.output(LEFT_IN1, GPIO.LOW)
-    GPIO.output(LEFT_IN2, GPIO.HIGH)
-    GPIO.output(RIGHT_IN1, GPIO.HIGH)
-    GPIO.output(RIGHT_IN2, GPIO.LOW)
-
-def turn_right():
-    GPIO.output(LEFT_IN1, GPIO.HIGH)
-    GPIO.output(LEFT_IN2, GPIO.LOW)
-    GPIO.output(RIGHT_IN1, GPIO.LOW)
-    GPIO.output(RIGHT_IN2, GPIO.HIGH)
-
-# 简单测试
-try:
-    print("前进")
-    forward()
-    time.sleep(2)
-
-    print("左转")
-    turn_left()
-    time.sleep(1)
-
-    print("右转")
-    turn_right()
-    time.sleep(1)
-
-    print("后退")
-    backward()
-    time.sleep(2)
-
-    print("停止")
-    stop()
-
-except KeyboardInterrupt:
-    stop()
-
-finally:
-    GPIO.cleanup()  # 清除引脚状态
+GPIO.cleanup()
