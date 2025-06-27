@@ -24,9 +24,24 @@ pwm_right_forward.start(0)
 pwm_right_backward.start(0)
 
 # 向前转，速度为 70%
-pwm_left_forward.ChangeDutyCycle(70)
-pwm_right_forward.ChangeDutyCycle(70)
-time.sleep(2)
+def forward():
+    pwm_left_forward.ChangeDutyCycle(70)
+    pwm_right_forward.ChangeDutyCycle(70)
+    time.sleep(2)
+
+#向右转，速度为70%
+def right():
+    pwm_left_forward.ChangeDutyCycle(70)
+    pwm_right_backward.ChangeDutyCycle(0)
+    time.sleep(2)
+
+
+# 向左转，速度为70%
+def left():
+    pwm_left_backward.ChangeDutyCycle(0)
+    pwm_right_forward.ChangeDutyCycle(70)
+    time.sleep(2)
+    
 
 # 停止所有转动
 for pwm in [pwm_left_forward, pwm_left_backward, pwm_right_forward, pwm_right_backward]:
