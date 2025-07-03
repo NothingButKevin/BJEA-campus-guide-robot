@@ -5,8 +5,8 @@ import sounddevice as sd
 from piper.voice import PiperVoice
 
 # 模型路径（你可以修改为自己的默认位置）
-MODEL_PATH = "piper_models/zh_CN-huayan-medium.onnx"
-CONFIG_PATH = "piper_models/zh_CN-huayan-medium.onnx.json"
+MODEL_PATH = "../piper_models/zh_CN-huayan-medium.onnx"
+CONFIG_PATH = "../piper_models/zh_CN-huayan-medium.onnx.json"
 
 # 提前加载模型（避免每次都重复加载）
 _voice = PiperVoice.load(model_path=MODEL_PATH, config_path=CONFIG_PATH)
