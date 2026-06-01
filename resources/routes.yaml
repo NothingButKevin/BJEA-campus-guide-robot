@@ -1,0 +1,35 @@
+# Navigation routes — distance (meters) + steering angle (degrees).
+# Positive angle = right turn, negative = left turn.
+# Distances and angles must be calibrated on actual hardware.
+
+8th_building:
+  - action: go
+    distance: 15.0
+  - action: turn
+    angle: 90
+  - action: go
+    distance: 8.0
+  - action: stop
+
+9th_building:
+  - action: go
+    distance: 15.0
+  - action: turn
+    angle: -90
+  - action: go
+    distance: 12.0
+  - action: stop
+
+10th_building:
+  - action: go
+    distance: 20.0
+  - action: stop
+
+11th_building:
+  - action: go
+    distance: 20.0
+  - action: turn
+    angle: 90
+  - action: go
+    distance: 10.0
+  - action: stop
