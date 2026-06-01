@@ -1,69 +1,74 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code (claude.ai/code) 在本仓库中工作时提供指南。
 
-## Overview
+## 项目概览
 
-Campus guide robot for BJEA (Beijing No. 80 High School International Department), running on **Raspberry Pi 5 with Pi OS**. The robot navigates campus locations, interacting via Chinese voice commands — speech recognition in, TTS and pre-recorded audio out.
+北京中学国际部（BJEA）校园导览机器人，运行在 **树莓派 5 + Pi OS** 上。全中文语音交互，全本地运行（零 API 依赖）。
 
-## Commands
+## 常用命令
 
 ```bash
-# Install dependencies (on Raspberry Pi)
-pip install -r requirements.txt
+pip install -r requirements.txt          # 安装依赖
+pip install -e ".[test]"                 # 安装测试依赖
 
-# Full campus navigation workflow
-python src/TEST.py
+python main.py                           # 完整导航工作流
+python main.py --demo                    # 语音控制行进 demo
+python main.py --config config.yaml      # 指定配置文件
 
-# Voice-controlled motion demo (forward/backward/left/right/stop)
-python src/demo.py
+pytest tests/ -v                         # 运行全部测试
 
-# Test individual modules
-python src/speechRecognition.py   # record & transcribe
-python src/text2speach.py         # TTS synthesis test
-python src/keywordsMapping.py     # interactive keyword matching test
-python src/audioPlaying.py        # pre-recorded audio playback test
+# 单独测试各模块
+python src/speech/recognizer.py          # 语音识别
+python src/speech/synthesizer.py         # TTS 合成
+python src/matching/keyword_matcher.py   # 关键词匹配
+python src/hardware/audio_player.py      # 预录音频播放
 ```
 
-There is no test runner, linter, or type checker configured. `src/main.py` is a placeholder (`pass`).
-
-## Architecture
+## 架构
 
 ```
-User speech ──▶ speechRecognition.py ──▶ keywordsMapping.py ──▶ action dispatch
-                    (Whisper.cpp)         (RapidFuzz + Pinyin)      │
-                                                                   ├── motorControl.py (GPIO/PWM)
-                                                                   ├── text2speach.py  (Piper TTS)
-                                                                   └── audioPlaying.py (pre-recorded WAVs)
+main.py ──▶ robot.py（状态机 + 模型生命周期管理）
+               │
+     ┌─────────┼──────────┬──────────────┐
+     ▼         ▼          ▼              ▼
+  speech/   matching/  navigation/   hardware/
+  ├─recognizer  ├─keyword_matcher  ├─navigator  ├─motor (抽象接口+RPi+Mock)
+  └─synthesizer └─(RapidFuzz+拼音)  └─(定距/定角) ├─sensors (MPU6050+编码器)
+                              │                   └─audio_player
+                         llm/fallback
+                    (Qwen2.5-0.5B 兜底)
 ```
 
-### Module responsibilities
+- **关键字匹配是主路径**（<10ms），LLM 仅在匹配置信度低于阈值时兜底
+- **导航期间卸载语音/LLM 模型**释放内存，到站后重新加载
+- 桌面端自动使用 Mock 硬件（不依赖 RPi.GPIO）
 
-- **`speechRecognition.py`** — Records mic input via `sounddevice` until silence is detected (2.5s threshold), then transcribes with Whisper.cpp (`base` model). Exposes `ASR()` which returns the transcribed Chinese text string.
+## 模块职责
 
-- **`keywordsMapping.py`** — Fuzzy-matches Chinese speech input to predefined keywords. Converts both input and keyword lists to pinyin (via `xpinyin`), then uses `rapidfuzz` partial-ratio scoring across all candidates. Returns the matched key (e.g. `"8th_building"`) or `"none"` if confidence is too low or ambiguous (score gap < 10). Keyword sets are loaded from JSON files in `resources/`.
+| 模块 | 功能 |
+|------|------|
+| `speech/recognizer.py` | 静音检测录音 + Whisper.cpp 转写中文 |
+| `speech/synthesizer.py` | Piper ONNX 中文 TTS，在内存中生成 WAV 并播放 |
+| `matching/keyword_matcher.py` | 拼音归一化 + RapidFuzz 模糊匹配，支持多意图集，返回置信度 |
+| `llm/fallback.py` | Qwen2.5-0.5B GGUF，llama-cpp-python 推理，`release()`/`reload()` 支持动态生命周期 |
+| `hardware/motor.py` | `MotorController` 抽象接口 + `RPiMotorController`（PWM）+ `MockMotorController`（日志），工厂自动选 |
+| `hardware/sensors.py` | MPU6050 航向 + 编码器里程计，桌面端返回零值自动降级 |
+| `hardware/audio_player.py` | 播放预录制 WAV（playsound），greeting / confirm / final 流程 |
+| `navigation/navigator.py` | `go_straight(距离)` `turn(角度)` 闭环运动原语 + `follow_route()` 路径执行 |
+| `robot.py` | 8 状态的状态机：IDLE → LISTENING → MATCHING → CONFIRMING/CHATTING → NAVIGATING → ARRIVED |
 
-- **`text2speach.py`** — Synthesizes Chinese speech using Piper TTS with the `zh_CN-huayan-medium` ONNX model. Generates WAV in-memory and plays via `sounddevice`. The model is loaded once at module import.
+## 配置文件
 
-- **`motorControl.py`** — `CarControl` class drives a PWM-controlled car chassis via `RPi.GPIO` (GPIO 27 for drive, 17 for steer, both at 50Hz). Duty cycles around 7.5 are neutral; 8 = forward/right, 7 = left. **Only runs on Raspberry Pi** — `RPi.GPIO` is not available on other platforms.
+- `config.yaml` — 所有可调参数（模型路径、GPIO 引脚、传感器标定、匹配阈值）
+- `resources/demoActions.json` — 移动指令关键词
+- `resources/locationKeywords.json` — 地点关键词 + 确认短语
+- `resources/chatIntents.json` — 闲聊意图（你是谁/你能干什么/再见…）
+- `resources/routes.yaml` — 导航路径定义（距离+转角序列）
+- `pyproject.toml` — 项目元数据 + pytest 配置
 
-- **`audioPlaying.py`** — Plays pre-recorded `.wav` files from `resources/audio/` using `playsound`. Follows a three-step flow: greeting → confirm location → final directions (part 1 + location + part 2).
+## 平台注意事项
 
-### Data files
-
-- `resources/demoActions.json` — movement command keywords (forward, backward, left, right, stop, end)
-- `resources/locationKeywords.json` — campus location keywords + confirmation phrases
-- `resources/audio/` — pre-recorded WAV clips: `greeting.wav`, `confirm.wav`, `finalPt1.wav`/`finalPt2.wav`, `misunderstoodError.wav`, `notUnderstandError.wav`, and per-location files under `location/`
-- `piper_models/zh_CN-huayan-medium.onnx` (+ `.json` config) — Chinese TTS voice model
-- `cache/` — temporary audio recordings from speech recognition
-
-### Two workflow entry points
-
-1. **`TEST.py`** — Full campus navigation: greeting → listen for destination → confirm with user → play final directions. Uses `locationKeywords.json`.
-2. **`demo.py`** — Voice-controlled motion test: listen for movement command → execute motor action (motor calls commented out, plays TTS feedback instead). Uses `demoActions.json`.
-
-## Platform notes
-
-- The `RPi.GPIO` import in `motorControl.py` means that module (and anything importing it) only works on a Raspberry Pi. The `demo.py` file has motor calls commented out so it can run/test on a desktop.
-- The repo contains a compiled `whispercpp.cpython-311-darwin.so` (macOS), but on the Raspberry Pi the `whispercpp` pip package handles the native library.
-- All speech is Chinese (Mandarin). The keyword matching uses pinyin normalization to handle pronunciation variations and fuzzy input.
+- `RPi.GPIO` 仅在树莓派上可用，桌面端自动降级为 Mock 实现
+- 所有语音输入输出为中文（普通话）
+- 关键词匹配使用拼音归一化处理口音和识别误差

@@ -1,5 +1,5 @@
-# BJEA Campus Guide Robot — Configuration
-# All tunable parameters in one place.
+# BJEA 校园导览机器人 —— 集中配置文件
+# 所有可调参数在此一处管理。
 
 tts:
   model_path: "piper_models/zh_CN-huayan-medium.onnx"
@@ -7,19 +7,19 @@ tts:
 
 asr:
   model: "base"
-  silence_threshold: 500
-  silence_duration: 2.5
+  silence_threshold: 500        # 静音判定阈值（幅度值）
+  silence_duration: 2.5         # 触发停止的静音持续秒数
   sample_rate: 44100
   output_path: "cache/output.wav"
 
 motor:
-  drive_pin: 27
-  steer_pin: 17
-  pwm_freq: 50
+  drive_pin: 27                 # 驱动电机 PWM 引脚（BCM 编号）
+  steer_pin: 17                 # 转向舵机 PWM 引脚（BCM 编号）
+  pwm_freq: 50                  # PWM 频率（Hz）
 
 sensors:
-  encoder_ticks_per_meter: 20   # calibrate on actual hardware
-  mpu6050_address: 0x68
+  encoder_ticks_per_meter: 20   # 编码器每米脉冲数（需在真车上标定）
+  mpu6050_address: 0x68         # I2C 地址
 
 resources:
   actions_file: "resources/demoActions.json"
@@ -28,12 +28,11 @@ resources:
   audio_dir: "resources/audio"
 
 chat:
-  # Confidence score below this triggers LLM fallback instead of "I don't understand"
-  match_threshold: 80
-  score_gap: 10
+  match_threshold: 80           # 低于此分数触发 LLM 兜底
+  score_gap: 10                 # 第一名与第二名差距小于此值视为模糊匹配
 
 llm:
-  # Qwen2.5-0.5B GGUF quantised model for open-ended chat fallback
+  # Qwen2.5-0.5B GGUF 量化模型 —— 开放式闲聊兜底
   model_path: "models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
   max_tokens: 64
   temperature: 0.7

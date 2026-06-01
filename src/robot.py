@@ -1,8 +1,7 @@
-"""Core robot state machine.
+"""机器人核心状态机。
 
-Orchestrates the full campus-guide workflow: listen → match → (confirm |
-chat) → navigate → arrive.  Manages model lifecycle so that the LLM and
-TTS models are unloaded during navigation to free memory for sensors.
+编排完整的校园导览工作流：听 → 匹配 → （确认 | 闲聊） → 导航 → 到站。
+管理模型生命周期 —— 导航期间卸载 LLM 和 TTS 模型以释放内存给传感器。
 """
 
 import logging
@@ -23,18 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 class State(Enum):
-    IDLE = auto()
-    LISTENING = auto()
-    MATCHING = auto()
-    CONFIRMING = auto()
-    CHATTING = auto()       # keyword match failed → LLM fallback
-    NAVIGATING = auto()     # driving; speech/LLM models unloaded
-    ARRIVED = auto()
-    SHUTDOWN = auto()
+    IDLE = auto()          # 空闲，等待启动
+    LISTENING = auto()     # 正在听用户说话
+    MATCHING = auto()      # 匹配用户输入
+    CONFIRMING = auto()    # 确认目的地
+    CHATTING = auto()      # 关键字匹配失败 → LLM 闲聊兜底
+    NAVIGATING = auto()    # 导航中；语音/LLM 模型已卸载
+    ARRIVED = auto()       # 到达目的地
+    SHUTDOWN = auto()      # 关机
 
 
 # ------------------------------------------------------------------
-# Chat intent responses (pre-recorded or TTS)
+# 闲聊意图预设回复（TTS 合成）
 # ------------------------------------------------------------------
 
 _CHAT_RESPONSES: dict[str, str] = {
@@ -47,13 +46,13 @@ _CHAT_RESPONSES: dict[str, str] = {
 
 
 class Robot:
-    """Top-level campus-guide robot application."""
+    """校园导览机器人顶层应用。"""
 
     def __init__(self, config_path: str = "config.yaml"):
         with open(config_path, "r", encoding="utf-8") as f:
             self._cfg = yaml.safe_load(f)
 
-        # --- modules --------------------------------------------------
+        # --- 模块组装 --------------------------------------------------
         self._cfg_res = self._cfg.get("resources", {})
         self._cfg_chat = self._cfg.get("chat", {})
 
@@ -65,16 +64,16 @@ class Robot:
         self.sensors = Sensors(self._cfg.get("sensors", {}))
         self.navigator = Navigator(self.motor, self.sensors, self._cfg.get("navigation", {}))
 
-        # LLM is loaded lazily on first fallback or can be pre-loaded.
+        # LLM 在第一次兜底时懒加载，也可预加载
         self._llm: LLMFallback | None = None
 
-        # --- state ----------------------------------------------------
+        # --- 状态 ------------------------------------------------------
         self.state = State.IDLE
         self._pending_location: str | None = None
         self._last_user_input: str = ""
 
     # ------------------------------------------------------------------
-    # Model lifecycle
+    # 模型生命周期管理
     # ------------------------------------------------------------------
 
     def _ensure_llm(self) -> LLMFallback:
@@ -83,10 +82,10 @@ class Robot:
         return self._llm
 
     def _enter_navigation(self, location: str):
-        """Unload speech / LLM models, begin driving."""
-        logger.info("Entering NAVIGATION → %s", location)
+        """卸载语音/LLM 模型，开始导航。"""
+        logger.info("进入导航状态 → %s", location)
 
-        # free memory
+        # 释放内存
         if self._llm is not None:
             self._llm.release()
         self.synthesizer.release()
@@ -94,7 +93,7 @@ class Robot:
         self.state = State.NAVIGATING
         self.motor.center_steering()
 
-        # drive
+        # 执行路径
         ok = self.navigator.follow_route(location)
         if not ok:
             self.synthesizer = SpeechSynthesizer(self._cfg.get("tts", {}))
@@ -102,18 +101,18 @@ class Robot:
             self.state = State.IDLE
             return
 
-        # arrived – bring speech models back
+        # 到站 —— 恢复语音模型
         self._exit_navigation(location)
 
     def _exit_navigation(self, location: str):
-        """Reload TTS model and play arrival audio."""
-        logger.info("Exiting NAVIGATION — reloading models")
+        """重新加载 TTS 模型并播报到站音频。"""
+        logger.info("退出导航状态 —— 重新加载模型")
         self.synthesizer = SpeechSynthesizer(self._cfg.get("tts", {}))
         self.audio.final_playing(location)
         self.state = State.ARRIVED
 
     # ------------------------------------------------------------------
-    # State handlers
+    # 状态处理函数
     # ------------------------------------------------------------------
 
     def _run_idle(self):
@@ -132,7 +131,7 @@ class Robot:
             self._last_user_input, score_threshold=threshold, score_gap=gap
         )
 
-        logger.info("Match: key=%s confidence=%.1f", key, confidence)
+        logger.info("匹配结果: key=%s 置信度=%.1f", key, confidence)
 
         if key == "none":
             self.state = State.CHATTING
@@ -145,7 +144,7 @@ class Robot:
                 self.synthesizer.speak("请先告诉我要去哪里。")
                 self.state = State.LISTENING
         else:
-            # navigation or action target
+            # 导航目标或动作指令
             self._pending_location = key
             self.state = State.CONFIRMING
 
@@ -157,7 +156,7 @@ class Robot:
 
     def _run_confirming(self):
         self.audio.confirm_playing(self._pending_location)
-        self.state = State.LISTENING  # next round will match confirm / retry
+        self.state = State.LISTENING  # 下一轮会匹配到 confirm 或重试
 
     def _run_chatting(self):
         llm = self._ensure_llm()
@@ -178,12 +177,12 @@ class Robot:
         self._pending_location = None
 
     # ------------------------------------------------------------------
-    # Main loop
+    # 主循环
     # ------------------------------------------------------------------
 
     def run(self):
-        """Blocking main loop — runs until SHUTDOWN."""
-        logger.info("Robot starting. State = %s", self.state.name)
+        """阻塞式主循环 —— 运行直到 SHUTDOWN 状态。"""
+        logger.info("机器人启动。当前状态 = %s", self.state.name)
 
         try:
             while self.state != State.SHUTDOWN:
@@ -197,13 +196,13 @@ class Robot:
                 }.get(self.state)
 
                 if handler is None:
-                    logger.error("No handler for state %s", self.state)
+                    logger.error("状态 %s 无处理函数", self.state)
                     break
 
                 handler()
 
         except KeyboardInterrupt:
-            logger.info("Keyboard interrupt — shutting down.")
+            logger.info("收到键盘中断 —— 正在关机。")
         finally:
             self.motor.cleanup()
-            logger.info("Robot stopped.")
+            logger.info("机器人已停止。")

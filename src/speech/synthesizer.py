@@ -1,4 +1,4 @@
-"""Chinese TTS synthesis using Piper (ONNX model, locally run)."""
+"""中文语音合成模块 —— 使用 Piper ONNX 模型本地推理。"""
 
 import io
 import logging
@@ -12,23 +12,23 @@ logger = logging.getLogger(__name__)
 
 
 class SpeechSynthesizer:
-    """Loads a Piper ONNX voice model and speaks text aloud."""
+    """加载 Piper ONNX 中文语音模型，将文本合成并播放。"""
 
     def __init__(self, config: dict):
         """
-        Args:
-            config: TTS config dict with keys model_path, config_path.
+        参数:
+            config: TTS 配置字典，包含 model_path, config_path。
         """
         model_path = config["model_path"]
         config_path = config["config_path"]
 
-        logger.info("Loading Piper voice model ...")
+        logger.info("正在加载 Piper 语音模型 ...")
         self._voice = PiperVoice.load(model_path=model_path, config_path=config_path)
         self._sample_rate = self._voice.config.sample_rate
         self._loaded = True
 
     def speak(self, text: str):
-        """Synthesise *text* and play it through the default output device."""
+        """将文本合成语音并通过默认输出设备播放。"""
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(1)
@@ -44,13 +44,13 @@ class SpeechSynthesizer:
             sd.wait()
 
     def release(self):
-        """Release the model to free memory during navigation."""
+        """释放模型以在导航期间腾出内存。"""
         self._loaded = False
         self._voice = None
 
 
 # ------------------------------------------------------------------
-# Standalone test
+# 独立测试入口
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

@@ -1,8 +1,7 @@
-"""Fuzzy Chinese keyword matching via pinyin normalisation + RapidFuzz.
+"""中文关键词模糊匹配 —— 通过拼音归一化 + RapidFuzz 实现。
 
-Supports multiple intent sets (navigation, chat, control) merged into one
-matcher instance.  Returns the matched key and a confidence score so
-callers can decide whether to use LLM fallback.
+支持多意图集（导航、闲聊、控制）合并到一个匹配器实例中。
+返回匹配键值和置信度，供调用方决定是否启用 LLM 兜底。
 """
 
 import json
@@ -18,21 +17,22 @@ _pinyin = Pinyin()
 
 
 # ------------------------------------------------------------------
-# Helpers
+# 工具函数
 # ------------------------------------------------------------------
 
 def load_json(path: str) -> dict:
+    """从文件加载 JSON 数据。"""
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _to_pinyin(text: str) -> str:
-    """Strip tones and separators, keep only pinyin letters."""
+    """去除音调和分隔符，只保留拼音字母。"""
     return "".join(_pinyin.get_pinyin(text, "").split("-"))
 
 
 def _prepare_pinyin_index(data: dict) -> tuple[list[str], list[str]]:
-    """Flatten {intent: [variants]} into (flat_pinyin_list, key_map)."""
+    """将 {意图: [变体列表]} 展平为 (拼音列表, 键映射表)。"""
     flat_list: list[str] = []
     key_map: list[str] = []
     for key, values in data.items():
@@ -43,13 +43,13 @@ def _prepare_pinyin_index(data: dict) -> tuple[list[str], list[str]]:
 
 
 # ------------------------------------------------------------------
-# Matcher
+# 匹配器
 # ------------------------------------------------------------------
 
 class KeywordMatcher:
-    """Fuzzy-match Chinese user input against keyword intent sets.
+    """将中文用户输入与关键词意图集进行模糊匹配。
 
-    Typical usage::
+    用法示例::
 
         matcher = KeywordMatcher({**location_data, **chat_data})
         result, confidence = matcher.match_with_confidence("我要去八号楼")
@@ -58,17 +58,17 @@ class KeywordMatcher:
 
     def __init__(self, data: dict):
         """
-        Args:
-            data: {intent_key: [variant_str, ...]} dictionary.
+        参数:
+            data: {意图键: [变体字符串列表]} 字典。
         """
         self._data = data
         self._flat_list, self._key_map = _prepare_pinyin_index(data)
 
-    # -- factory -------------------------------------------------------
+    # -- 工厂方法 -------------------------------------------------------
 
     @classmethod
     def from_config(cls, config: dict) -> "KeywordMatcher":
-        """Build a matcher by loading JSON files listed in *config*."""
+        """根据配置文件加载 JSON 并构造匹配器。"""
         data: dict = {}
         data.update(load_json(config["actions_file"]))
         data.update(load_json(config["locations_file"]))
@@ -77,10 +77,10 @@ class KeywordMatcher:
             data.update(load_json(chat_path))
         return cls(data)
 
-    # -- matching ------------------------------------------------------
+    # -- 匹配 ------------------------------------------------------------
 
     def match(self, user_input: str, score_threshold: int = 80, score_gap: int = 10) -> str:
-        """Return the best-match key or ``"none"``."""
+        """返回最佳匹配的键名，无匹配时返回 ``"none"``。"""
         result, _ = self.match_with_confidence(user_input, score_threshold, score_gap)
         return result
 
@@ -90,18 +90,18 @@ class KeywordMatcher:
         score_threshold: int = 80,
         score_gap: int = 10,
     ) -> tuple[str, float]:
-        """Return ``(key | "none", confidence_score)``."""
+        """返回 ``(key | "none", 置信度分数)``。"""
         if not user_input.strip():
             return "none", 0.0
 
         user_pinyin = _to_pinyin(user_input)
 
-        # batch-compare against every pinyin variant
+        # 与所有拼音变体批量比对
         scores = process.cdist(
             [user_pinyin], self._flat_list, scorer=fuzz.partial_ratio, workers=1
         )[0]
 
-        # aggregate to key-level (keep the best score per key)
+        # 按意图键聚合，每个键保留最高分
         score_by_key: dict[str, float] = {}
         for i, score in enumerate(scores):
             key = self._key_map[i]
@@ -113,16 +113,16 @@ class KeywordMatcher:
         if not sorted_scores or sorted_scores[0][1] < score_threshold:
             return "none", 0.0
 
-        # ambiguous match?
+        # 结果是否模糊（第一名和第二名差距太小）
         if len(sorted_scores) > 1 and sorted_scores[0][1] - sorted_scores[1][1] < score_gap:
             return "none", sorted_scores[0][1]
 
-        logger.debug("Matched '%s' -> %s (%.1f)", user_input, sorted_scores[0][0], sorted_scores[0][1])
+        logger.debug("匹配 '%s' -> %s (%.1f)", user_input, sorted_scores[0][0], sorted_scores[0][1])
         return sorted_scores[0][0], sorted_scores[0][1]
 
 
 # ------------------------------------------------------------------
-# Standalone test
+# 独立测试入口
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)

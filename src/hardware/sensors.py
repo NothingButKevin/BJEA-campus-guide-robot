@@ -1,7 +1,6 @@
-"""Sensor abstraction: MPU6050 IMU + wheel encoders.
+"""传感器抽象层 —— MPU6050 陀螺仪 + 轮式编码器。
 
-Provides heading angle and distance-travelled readings used by the
-navigator for closed-loop motion primitives.
+提供航向角和行进距离读数，供导航器实现闭环运动原语。
 """
 
 import logging
@@ -11,10 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class Sensors:
-    """Read MPU6050 heading and encoder-based odometry.
+    """读取 MPU6050 航向和编码器里程计数据。
 
-    On a desktop (mock mode), heading and distance are always zero so the
-    navigator falls back to open-loop timing.
+    在桌面端（Mock 模式）下航向和距离均返回零，导航器自动降级为
+    开环时间估算。
     """
 
     def __init__(self, config: dict):
@@ -23,16 +22,16 @@ class Sensors:
 
         self._mpu = self._init_mpu()
 
-        # heading state
+        # 航向状态
         self._heading_bias: float = 0.0
         self._last_gyro_time: float = 0.0
         self._heading: float = 0.0
 
-        # odometry state
+        # 里程计状态
         self._encoder_count: int = 0
         self._distance_bias: float = 0.0
 
-        logger.info("Sensors initialised (mock=%s)", self._mpu is None)
+        logger.info("传感器初始化完毕（Mock=%s）", self._mpu is None)
 
     # ------------------------------------------------------------------
     def _init_mpu(self):
@@ -41,15 +40,15 @@ class Sensors:
 
             return MPU6050(self._mpu_address)
         except Exception:
-            logger.warning("MPU6050 unavailable – heading will be mock (0.0)")
+            logger.warning("MPU6050 不可用 —— 航向将使用 Mock 值 (0.0)")
             return None
 
     # ------------------------------------------------------------------
-    # Heading (gyro integration)
+    # 航向（陀螺仪积分）
     # ------------------------------------------------------------------
 
     def get_heading(self) -> float:
-        """Current absolute heading in degrees (positive = right turn from reset)."""
+        """当前绝对航向角（度），正值表示自归零后右转。"""
         if self._mpu is None:
             return 0.0
 
@@ -58,7 +57,7 @@ class Sensors:
         self._last_gyro_time = now
 
         try:
-            gyro_z = self._mpu.get_gyro_data()["z"]  # deg / s
+            gyro_z = self._mpu.get_gyro_data()["z"]  # 度/秒
             self._heading += gyro_z * dt
         except Exception:
             pass
@@ -66,16 +65,16 @@ class Sensors:
         return self._heading - self._heading_bias
 
     def reset_heading(self):
-        """Zero the heading reference."""
+        """将当前航向归零作为基准。"""
         self._heading_bias = self._heading
         self._last_gyro_time = time.time()
 
     # ------------------------------------------------------------------
-    # Odometry (encoder)
+    # 里程计（编码器）
     # ------------------------------------------------------------------
 
     def get_distance_traveled(self) -> float:
-        """Distance in metres since last ``reset_distance()``."""
+        """自上次 ``reset_distance()`` 以来的行进距离（米）。"""
         if self._ticks_per_meter <= 0:
             return 0.0
         raw = self._encoder_count
@@ -83,11 +82,11 @@ class Sensors:
         return dist - self._distance_bias
 
     def reset_distance(self):
-        """Zero the odometer reference."""
+        """归零里程计基准。"""
         self._distance_bias = self._encoder_count / max(self._ticks_per_meter, 1)
 
     # ------------------------------------------------------------------
-    # Encoder tick feed (call from GPIO interrupt or polling loop)
+    # 编码器脉冲输入（由 GPIO 中断或轮询循环调用）
     # ------------------------------------------------------------------
 
     def increment_encoder(self, ticks: int = 1):

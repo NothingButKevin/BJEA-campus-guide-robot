@@ -1,16 +1,16 @@
-"""Tests for KeywordMatcher — pinyin fuzzy matching."""
+"""测试 KeywordMatcher —— 拼音模糊匹配。"""
 
 import sys
 from pathlib import Path
 
-# Ensure src is importable from tests/
+# 确保 src 在测试中可导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from matching.keyword_matcher import KeywordMatcher
 
 
 # ------------------------------------------------------------------
-# Fixtures
+# 测试数据
 # ------------------------------------------------------------------
 
 _chat_data = {
@@ -25,39 +25,42 @@ def _mk(data: dict) -> KeywordMatcher:
 
 
 # ------------------------------------------------------------------
-# Basic matching
+# 基本匹配
 # ------------------------------------------------------------------
 
 class TestBasicMatch:
     def test_exact_match(self):
+        """完全匹配"""
         m = _mk(_chat_data)
         assert m.match("你好") == "chat_greeting"
 
     def test_partial_match(self):
+        """部分匹配 —— "你是" 应模糊匹配到 "你是谁" """
         m = _mk(_chat_data)
-        # "你是" should fuzzy-match to "你是谁"
         result = m.match("你是")
-        assert result == "chat_identity", f"Got {result!r}"
+        assert result == "chat_identity", f"得到 {result!r}"
 
     def test_fuzzy_phonetic(self):
+        """拼音模糊 —— "哈罗" 接近 "哈喽" """
         m = _mk(_chat_data)
-        # "哈罗" close to "哈喽" in pinyin ("haluo" vs "halou")
         result = m.match("哈罗")
         assert result == "chat_greeting" or result != "none"
 
 
 # ------------------------------------------------------------------
-# Confidence scores
+# 置信度
 # ------------------------------------------------------------------
 
 class TestConfidence:
     def test_high_confidence_exact(self):
+        """精确匹配应得高分"""
         m = _mk(_chat_data)
         key, conf = m.match_with_confidence("你好")
         assert key == "chat_greeting"
         assert conf > 90
 
     def test_low_confidence_unrelated(self):
+        """不相关输入应返回 none 且低分"""
         m = _mk(_chat_data)
         key, conf = m.match_with_confidence("xyz 完全不相关的话")
         assert key == "none"
@@ -65,23 +68,24 @@ class TestConfidence:
 
 
 # ------------------------------------------------------------------
-# Thresholds
+# 阈值
 # ------------------------------------------------------------------
 
 class TestThresholds:
     def test_threshold_too_high(self):
+        """阈值过高时非精确匹配应返回 none"""
         m = _mk(_chat_data)
-        # With threshold=99 and a non-exact match, should return "none"
         key, _ = m.match_with_confidence("干啥的", score_threshold=99)
         assert key == "none"
 
 
 # ------------------------------------------------------------------
-# Multi-intent (merged datasets)
+# 多意图集（合并数据集）
 # ------------------------------------------------------------------
 
 class TestMultiIntent:
     def test_distinguishes_nav_from_chat(self):
+        """正确区分导航意图和闲聊意图"""
         data = {
             "8th_building": ["八号楼", "八号", "国际部"],
             "chat_greeting": ["你好", "哈喽"],

@@ -1,10 +1,9 @@
-"""Sensor-based navigation primitives.
+"""传感器闭环导航执行器。
 
-Replaces the old time-based dead-reckoning ("go forward N seconds") with
-closed-loop primitives that use encoder odometry and MPU6050 heading.
+用编码器里程计和 MPU6050 航向角替换原来的时间打表（"前进 N 秒"），
+实现定距走、定角转的闭环运动原语。
 
-On desktop / mock hardware the sensor readings are zero, so the navigator
-falls back to timed open-loop operation automatically.
+桌面端 / Mock 硬件下传感器读数为零，自动降级为开环时间估算。
 """
 
 import logging
@@ -18,15 +17,15 @@ from hardware.sensors import Sensors
 
 logger = logging.getLogger(__name__)
 
-# Fallback speed for open-loop mode (m/s estimate — tune on hardware).
+# 开环模式下估算的前进速度（米/秒 —— 需在真车上标定）
 _FALLBACK_SPEED_MPS = 0.3
 
-# Minimum step duration for closed-loop correction (seconds).
+# 闭环修正的最小间隔（秒）
 _CORRECTION_INTERVAL = 0.05
 
 
 class Navigator:
-    """Executes route steps using sensor feedback when available."""
+    """利用传感器反馈执行路径步骤。"""
 
     def __init__(self, motor: MotorController, sensors: Sensors, config: dict):
         self._motor = motor
@@ -40,18 +39,18 @@ class Navigator:
             with open(path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         except FileNotFoundError:
-            logger.warning("Routes file not found: %s", path)
+            logger.warning("路径文件未找到: %s", path)
         except yaml.YAMLError:
-            logger.warning("Failed to parse routes file: %s", path)
+            logger.warning("路径文件解析失败: %s", path)
         return {}
 
     # ------------------------------------------------------------------
-    # Motion primitives
+    # 运动原语
     # ------------------------------------------------------------------
 
     def go_straight(self, distance_meters: float):
-        """Drive forward *distance_meters*, keeping heading straight."""
-        logger.info("Navigator: go_straight %.1f m", distance_meters)
+        """按编码器里程计前进 *distance_meters* 米，MPU6050 保持航向不偏。"""
+        logger.info("导航器: 直行 %.1f 米", distance_meters)
 
         self._sensors.reset_distance()
         self._sensors.reset_heading()
@@ -66,12 +65,12 @@ class Navigator:
                 dist = self._sensors.get_distance_traveled()
                 if dist >= distance_meters:
                     break
-                # keep heading straight
+                # 保持直线不偏 —— P 控制器修正航向
                 heading_err = self._sensors.get_heading()
                 correction = max(-1.0, min(1.0, -heading_err * 0.5))
                 self._motor.steer(correction)
             else:
-                # open-loop fallback: estimate from elapsed time
+                # 开环兜底：根据时间估算
                 est = elapsed * _FALLBACK_SPEED_MPS
                 if est >= distance_meters:
                     break
@@ -82,10 +81,10 @@ class Navigator:
         self._motor.stop()
 
     def turn(self, degrees: float):
-        """Turn *degrees* in place. Positive = right, negative = left."""
+        """原地转向 *degrees* 度。正值 = 右转，负值 = 左转。"""
         direction = 1 if degrees >= 0 else -1
         target = abs(degrees)
-        logger.info("Navigator: turn %+.0f deg", degrees)
+        logger.info("导航器: 转向 %+.0f 度", degrees)
 
         self._sensors.reset_heading()
 
@@ -98,7 +97,7 @@ class Navigator:
                 if current >= target:
                     break
             else:
-                # rough open-loop estimate: ~45 deg/s at steering duty ~0.5
+                # 开环粗略估算：约 45 度/秒（舵机占空比 ~0.5）
                 elapsed = time.time() - start_time
                 if elapsed * 45 >= target:
                     break
@@ -111,25 +110,25 @@ class Navigator:
         self._motor.stop()
 
     # ------------------------------------------------------------------
-    # Route execution
+    # 路径执行
     # ------------------------------------------------------------------
 
     def follow_route(self, route_name: str):
-        """Execute all steps of a named route from routes.yaml.
+        """执行 routes.yaml 中指定路径的所有步骤。
 
-        Returns True if the route completed, False if the route is missing.
+        返回 True 表示路径执行完毕，False 表示路径不存在。
         """
         steps: list[dict[str, Any]] = self._routes.get(route_name, [])
 
         if not steps:
-            logger.error("Unknown route: %s", route_name)
+            logger.error("未知路径: %s", route_name)
             return False
 
-        logger.info("Navigator: starting route '%s' (%d steps)", route_name, len(steps))
+        logger.info("导航器: 开始执行路径 '%s'（共 %d 步）", route_name, len(steps))
 
         for i, step in enumerate(steps):
             action = step.get("action", "")
-            logger.debug("  step %d/%d: %s %s", i + 1, len(steps), action, step)
+            logger.debug("  第 %d/%d 步: %s %s", i + 1, len(steps), action, step)
 
             if action == "go":
                 self.go_straight(float(step.get("distance", 0)))
@@ -138,13 +137,13 @@ class Navigator:
             elif action == "stop":
                 break
             else:
-                logger.warning("Unknown action '%s' – skipping", action)
+                logger.warning("未知动作 '%s' —— 跳过", action)
 
         self._motor.stop()
-        logger.info("Navigator: route '%s' complete", route_name)
+        logger.info("导航器: 路径 '%s' 执行完毕", route_name)
         return True
 
     @property
     def routes(self) -> list[str]:
-        """List known route names."""
+        """列出所有已知路径名称。"""
         return list(self._routes.keys())

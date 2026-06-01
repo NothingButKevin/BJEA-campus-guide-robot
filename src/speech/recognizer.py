@@ -1,4 +1,4 @@
-"""Speech recognition using Whisper.cpp with silence-based auto-stop recording."""
+"""语音识别模块 —— 基于 Whisper.cpp 的静音检测录音 + 转写。"""
 
 import logging
 import wave
@@ -11,14 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 class SpeechRecognizer:
-    """Records mic input until silence, then transcribes with Whisper.cpp."""
+    """录音直到静音，然后用 Whisper.cpp 转写为中文文本。"""
 
     def __init__(self, config: dict):
         """
-        Args:
-            config: ASR config dict with keys:
-                model, silence_threshold, silence_duration,
-                sample_rate, output_path
+        参数:
+            config: ASR 配置字典，包含 model, silence_threshold,
+                    silence_duration, sample_rate, output_path
         """
         self.model_name = config["model"]
         self.silence_threshold = config["silence_threshold"]
@@ -26,21 +25,21 @@ class SpeechRecognizer:
         self.sample_rate = config["sample_rate"]
         self.output_path = config["output_path"]
 
-        logger.info("Loading Whisper model '%s' ...", self.model_name)
+        logger.info("正在加载 Whisper 模型 '%s' ...", self.model_name)
         self._whisper = Whisper(self.model_name)
         self._is_running = False
 
     # ------------------------------------------------------------------
-    # Internal recording
+    # 内部录音逻辑
     # ------------------------------------------------------------------
 
     def _record_until_silence(self, chunk: int = 1024, channels: int = 1):
-        """Record from the default microphone until silence is detected.
+        """从默认麦克风录音，检测到静音后自动停止。
 
-        Returns the path to the saved WAV file.
+        返回保存的 WAV 文件路径。
         """
         frames: list = []
-        # Give the user a 3 s grace period before silence detection kicks in.
+        # 给用户 3 秒缓冲时间，避免还没说话就结束录音
         silent_chunks = -int(self.sample_rate / chunk * 3)
         max_silent_chunks = int(self.sample_rate / chunk * self.silence_duration)
         stop_recording = False
@@ -48,7 +47,7 @@ class SpeechRecognizer:
         def _audio_callback(indata, frames_per_buffer, time, status):
             nonlocal silent_chunks, stop_recording
             if status:
-                logger.warning("Audio status: %s", status)
+                logger.warning("音频状态异常: %s", status)
 
             audio_data = np.frombuffer(indata, dtype=np.int16)
             volume = np.abs(audio_data).mean()
@@ -61,11 +60,11 @@ class SpeechRecognizer:
                 silent_chunks = 0
 
             if silent_chunks > max_silent_chunks:
-                logger.debug("Silence detected – stopping recording.")
+                logger.debug("检测到静音 —— 停止录音。")
                 stop_recording = True
                 raise sd.CallbackStop
 
-        logger.info("Recording ... speak into the microphone.")
+        logger.info("正在录音 ... 请对着麦克风说话。")
         try:
             with sd.InputStream(
                 samplerate=self.sample_rate,
@@ -81,32 +80,32 @@ class SpeechRecognizer:
 
         with wave.open(self.output_path, "wb") as wf:
             wf.setnchannels(channels)
-            wf.setsampwidth(2)  # int16
+            wf.setsampwidth(2)  # 16-bit
             wf.setframerate(self.sample_rate)
             audio_data = np.frombuffer(b"".join(frames), dtype=np.int16)
             wf.writeframes(audio_data.tobytes())
 
-        logger.debug("Recording saved to %s", self.output_path)
+        logger.debug("录音已保存至 %s", self.output_path)
 
     # ------------------------------------------------------------------
-    # Public API
+    # 对外接口
     # ------------------------------------------------------------------
 
     def recognize(self) -> str:
-        """Record speech and return the transcribed Chinese text."""
+        """录音并返回转写的中文文本。"""
         self._record_until_silence()
         result = self._whisper.transcribe(self.output_path)
         text = "".join(self._whisper.extract_text(result))
-        logger.info("Recognised: %s", text)
+        logger.info("识别结果: %s", text)
         return text
 
     def stop(self):
-        """Release resources (e.g. before model swap during navigation)."""
+        """释放资源（导航前切换模型时调用）。"""
         self._is_running = False
 
 
 # ------------------------------------------------------------------
-# Standalone test
+# 独立测试入口
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
