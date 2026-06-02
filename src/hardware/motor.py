@@ -39,65 +39,55 @@ class MotorController(ABC):
 
 
 # ------------------------------------------------------------------
-# 树莓派实现（通过 RPi.GPIO 输出 PWM）
+# 树莓派实现（通过 gpiozero 输出 PWM，兼容 Pi 5 的 RP1 芯片）
 # ------------------------------------------------------------------
 
 class RPiMotorController(MotorController):
-    """PWM 控制的车用底盘，使用 RPi.GPIO。
+    """PWM 控制的车用底盘，使用 gpiozero。
 
-    注意:
-        仅树莓派平台可用，依赖 ``RPi.GPIO`` 库。
+    兼容树莓派 3/4/5，gpiozero 自动选择底层 GPIO 驱动（Pi 5 用 lgpio，旧版用 RPi.GPIO）。
     """
 
     def __init__(self, config: dict):
-        import RPi.GPIO as GPIO
+        from gpiozero import Servo
 
-        self._drive_pin = config["drive_pin"]
-        self._steer_pin = config["steer_pin"]
-        freq = config.get("pwm_freq", 50)
+        self._drive = Servo(config["drive_pin"])
+        self._steer = Servo(config["steer_pin"])
 
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self._drive_pin, GPIO.OUT)
-        GPIO.setup(self._steer_pin, GPIO.OUT)
-
-        self._pwm_drive = GPIO.PWM(self._drive_pin, freq)
-        self._pwm_steer = GPIO.PWM(self._steer_pin, freq)
-
-        # 初始化为中位信号
-        self._pwm_drive.start(7.5)
-        self._pwm_steer.start(7.5)
+        # 初始化为中位信号（value=0 对应 1.5ms 脉冲）
+        self._drive.value = 0
+        self._steer.value = 0
 
         logger.info(
             "RPi 电机控制器就绪（驱动=GPIO%d 转向=GPIO%d）",
-            self._drive_pin,
-            self._steer_pin,
+            config["drive_pin"],
+            config["steer_pin"],
         )
 
     def forward(self, speed: float = 0.3):
-        duty = 7.5 + speed * 0.5
-        self._pwm_drive.ChangeDutyCycle(duty)
+        """前进，speed 0.0–1.0，映射为 1.5–1.6ms 脉冲。"""
+        self._drive.value = speed * 0.2
 
     def backward(self, speed: float = 0.3):
-        duty = 7.5 - speed * 0.5
-        self._pwm_drive.ChangeDutyCycle(duty)
+        """后退，speed 0.0–1.0，映射为 1.5–1.4ms 脉冲。"""
+        self._drive.value = -speed * 0.2
 
     def stop(self):
-        self._pwm_drive.ChangeDutyCycle(7.5)
+        """驱动电机回中（1.5ms 脉冲 = 停止）。"""
+        self._drive.value = 0
 
     def steer(self, value: float):
-        """value: -1.0（左） … 1.0（右）。中位 = 7.5% 占空比。"""
-        duty = 7.5 + value * 0.5
-        self._pwm_steer.ChangeDutyCycle(duty)
+        """转向：-1.0（左） … 1.0（右）。中位 = 1.5ms 脉冲。"""
+        self._steer.value = value * 0.2
 
     def center_steering(self):
-        self._pwm_steer.ChangeDutyCycle(7.5)
+        """转向回中。"""
+        self._steer.value = 0
 
     def cleanup(self):
-        import RPi.GPIO as GPIO
-
-        self._pwm_drive.stop()
-        self._pwm_steer.stop()
-        GPIO.cleanup()
+        """释放 PWM 资源。"""
+        self._drive.close()
+        self._steer.close()
 
 
 # ------------------------------------------------------------------
@@ -134,9 +124,9 @@ class MockMotorController(MotorController):
 def create_motor(config: dict) -> MotorController:
     """根据当前平台自动选择电机控制器实现。"""
     try:
-        import RPi.GPIO  # noqa: F401
+        from gpiozero import Servo  # noqa: F401
 
         return RPiMotorController(config)
     except ImportError:
-        logger.info("RPi.GPIO 不可用 —— 使用 Mock 电机控制器")
+        logger.info("gpiozero 不可用 —— 使用 Mock 电机控制器")
         return MockMotorController()
