@@ -39,55 +39,78 @@ class MotorController(ABC):
 
 
 # ------------------------------------------------------------------
-# 树莓派实现（通过 gpiozero 输出 PWM，兼容 Pi 5 的 RP1 芯片）
+# 树莓派实现（通过 gpiozero + lgpio 输出 PWM，兼容 Pi 5 的 RP1 芯片）
 # ------------------------------------------------------------------
 
 class RPiMotorController(MotorController):
-    """PWM 控制的车用底盘，使用 gpiozero。
+    """PWM 控制的车用底盘，使用 gpiozero + lgpio 后端。
 
-    兼容树莓派 3/4/5，gpiozero 自动选择底层 GPIO 驱动（Pi 5 用 lgpio，旧版用 RPi.GPIO）。
+    硬件接线（差分混控驱动板）：:
+
+        - **油门引脚**（drive_pin，GPIO27）：>7.5% 占空比 = 双轮前进，
+          7.5% = 停止，<7.5% = 双轮后退。
+        - **转向引脚**（steer_pin，GPIO17）：>7.5% = 右转（左前右后），
+          7.5% = 直行，<7.5% = 左转（左后右前）。
+
+    驱动板内置混控，最终输出为::
+
+        左轮 = 油门 + 转向
+        右轮 = 油门 - 转向
+
+    因此两个 Servo 信号叠加后即可实现差速转向。
+
+    .. 注意::
+
+        Pi 5 必须设置 ``GPIOZERO_PIN_FACTORY=lgpio``（构造函数自动处理），
+        否则 gpiozero 回退到 RPi.GPIO 软件 PWM，在 RP1 芯片上不工作。
     """
 
     def __init__(self, config: dict):
+        import os
+
+        # Pi 5（RP1 芯片）需要 lgpio 后端，否则 PWM 无输出
+        if "GPIOZERO_PIN_FACTORY" not in os.environ:
+            os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"
+
         from gpiozero import Servo
 
-        self._drive = Servo(config["drive_pin"])
-        self._steer = Servo(config["steer_pin"])
+        self._throttle = Servo(config["drive_pin"])   # GPIO27 → 油门
+        self._steering = Servo(config["steer_pin"])   # GPIO17 → 转向
 
-        # 初始化为中位信号（value=0 对应 1.5ms 脉冲）
-        self._drive.value = 0
-        self._steer.value = 0
+        # 初始化为中位信号（value=0 对应 1.5ms / 7.5% 脉冲）
+        self._throttle.value = 0
+        self._steering.value = 0
 
         logger.info(
-            "RPi 电机控制器就绪（驱动=GPIO%d 转向=GPIO%d）",
+            "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d）",
             config["drive_pin"],
             config["steer_pin"],
         )
 
     def forward(self, speed: float = 0.3):
-        """前进，speed 0.0–1.0，映射为 1.5–1.6ms 脉冲。"""
-        self._drive.value = speed * 0.2
+        """前进，*speed* 0.0–1.0，油门输出 1.5–1.6ms 脉冲。"""
+        self._throttle.value = speed * 0.2
 
     def backward(self, speed: float = 0.3):
-        """后退，speed 0.0–1.0，映射为 1.5–1.4ms 脉冲。"""
-        self._drive.value = -speed * 0.2
+        """后退，*speed* 0.0–1.0，油门输出 1.5–1.4ms 脉冲。"""
+        self._throttle.value = -speed * 0.2
 
     def stop(self):
-        """驱动电机回中（1.5ms 脉冲 = 停止）。"""
-        self._drive.value = 0
+        """油门回中（1.5ms 脉冲 = 停止）。"""
+        self._throttle.value = 0
 
     def steer(self, value: float):
-        """转向：-1.0（左） … 1.0（右）。中位 = 1.5ms 脉冲。"""
-        self._steer.value = value * 0.2
+        """转向：-1.0（左转） … 1.0（右转），中位 = 1.5ms 脉冲。"""
+        self._steering.value = value * 0.2
 
     def center_steering(self):
         """转向回中。"""
-        self._steer.value = 0
+        self._steering.value = 0
 
     def cleanup(self):
         """释放 PWM 资源。"""
-        self._drive.close()
-        self._steer.close()
+        self._throttle.close()
+        self._steering.close()
 
 
 # ------------------------------------------------------------------
