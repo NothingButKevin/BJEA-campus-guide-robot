@@ -69,7 +69,7 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
      ┌─────────┼──────────┬──────────────┐
      ▼         ▼          ▼              ▼
   speech/   matching/  navigation/   hardware/
-  ├─recognizer  ├─keyword_matcher  ├─navigator  ├─motor (抽象接口+RPi+Mock)
+  ├─recognizer  ├─keyword_matcher  ├─navigator  ├─motor (抽象接口+gpiozero+Mock)
   └─synthesizer └─(RapidFuzz+拼音)  └─(定距/定角) ├─sensors (MPU6050+编码器)
                               │                   └─audio_player
                          llm/fallback
@@ -78,7 +78,7 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
 
 - **关键字匹配是主路径**（<10ms），LLM 仅在匹配置信度低于阈值时兜底
 - **导航期间卸载语音/LLM 模型**释放内存，到站后重新加载
-- 桌面端自动使用 Mock 硬件（不依赖 RPi.GPIO）
+- 桌面端自动使用 Mock 硬件（不依赖 gpiozero）
 
 ## 模块职责
 
@@ -120,6 +120,6 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
 
 ## 平台注意事项
 
-- `RPi.GPIO` 仅在树莓派上可用，桌面端自动降级为 Mock 实现
+- `gpiozero` 在树莓派上自动选择正确后端（Pi 5 用 lgpio），桌面端自动降级为 Mock 实现。注意必须设 `GPIOZERO_PIN_FACTORY=lgpio`，该操作已在 `motor.py` 构造函数中自动完成。
 - 所有语音输入输出为中文（普通话）
 - 关键词匹配使用拼音归一化处理口音和识别误差
