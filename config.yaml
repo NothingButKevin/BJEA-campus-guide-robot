@@ -2,8 +2,7 @@
 # 所有可调参数在此一处管理。
 
 tts:
-  model_path: "piper_models/zh_CN-huayan-medium.onnx"
-  config_path: "piper_models/zh_CN-huayan-medium.onnx.json"
+  voice: "zh-CN-XiaoxiaoNeural"   # Edge-TTS 中文女声（微软晓晓）
 
 asr:
   model: "base"
@@ -25,7 +24,7 @@ resources:
   actions_file: "resources/demoActions.json"
   locations_file: "resources/locationKeywords.json"
   chat_intents_file: "resources/chatIntents.json"
-  audio_dir: "resources/audio"
+  audio_dir: ""   # 已迁移至 Edge-TTS，不再使用预录音频
 
 chat:
   match_threshold: 80           # 低于此分数触发 LLM 兜底

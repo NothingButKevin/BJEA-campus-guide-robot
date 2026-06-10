@@ -1,47 +1,40 @@
-"""预录制 WAV 音频播放模块。"""
+"""音频播报模块 —— 使用 TTS 合成替代预录制 WAV 播放。"""
 
 import logging
-import os
-
-from playsound import playsound
 
 logger = logging.getLogger(__name__)
 
+_LOCATION_NAMES = {
+    "8th_building": "八号楼",
+    "9th_building": "九号楼",
+    "10th_building": "十号楼",
+    "11th_building": "十一号楼",
+}
+
+
+def _loc_name(key: str) -> str:
+    return _LOCATION_NAMES.get(key, key)
+
 
 class AudioPlayer:
-    """播放预录制的系统音频（问候、确认、路径指引、错误提示等）。"""
+    """使用 TTS 合成器播报系统语音（问候 / 确认 / 到达）。"""
 
-    def __init__(self, audio_dir: str = "resources/audio"):
-        self._dir = audio_dir
+    def __init__(self, synthesizer):
+        self._tts = synthesizer
 
-    def _play(self, *segments: str):
-        for seg in segments:
-            path = os.path.join(self._dir, seg)
-            if not os.path.exists(path):
-                logger.warning("音频文件不存在: %s", path)
-                continue
-            playsound(path)
+    def greeting(self):
+        self._tts.speak("你好！我是 BJEA 校园导览机器人，请问要去哪里？")
 
-    # ------------------------------------------------------------------
-    def simple_playing(self, name: str):
-        """播放单个音频片段（不含扩展名）。"""
-        self._play(f"{name}.wav")
+    def confirm(self, location: str):
+        name = _loc_name(location)
+        self._tts.speak(f"确认前往{name}，请说确认或取消。")
 
-    def confirm_playing(self, location: str):
-        """播放确认提示音 + 地点专属音频。"""
-        self._play("confirm.wav", f"location/{location}.wav")
+    def arrived(self, location: str):
+        name = _loc_name(location)
+        self._tts.speak(f"已到达{name}，感谢使用校园导览服务。")
 
-    def final_playing(self, location: str):
-        """播放终点播报：开场 + 地点介绍 + 结尾。"""
-        self._play("finalPt1.wav", f"location/{location}.wav", "finalPt2.wav")
+    def error_path_not_found(self):
+        self._tts.speak("抱歉，我不认识这条路。")
 
-
-# ------------------------------------------------------------------
-# 独立测试入口
-# ------------------------------------------------------------------
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    player = AudioPlayer("resources/audio")
-    player.simple_playing("greeting")
-    player.confirm_playing("8th_building")
-    player.final_playing("11th_building")
+    def error_not_understood(self):
+        self._tts.speak("抱歉，我不太明白您的意思。")

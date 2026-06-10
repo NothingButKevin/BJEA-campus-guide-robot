@@ -58,7 +58,7 @@ class Robot:
 
         self.recognizer = SpeechRecognizer(self._cfg.get("asr", {}))
         self.synthesizer = SpeechSynthesizer(self._cfg.get("tts", {}))
-        self.audio = AudioPlayer(self._cfg_res.get("audio_dir", "resources/audio"))
+        self.audio = AudioPlayer(self.synthesizer)
         self.matcher = KeywordMatcher.from_config(self._cfg_res)
         self.motor = create_motor(self._cfg.get("motor", {}))
         self.sensors = Sensors(self._cfg.get("sensors", {}))
@@ -97,7 +97,7 @@ class Robot:
         ok = self.navigator.follow_route(location)
         if not ok:
             self.synthesizer = SpeechSynthesizer(self._cfg.get("tts", {}))
-            self.synthesizer.speak("抱歉，我不认识这条路。")
+            self.audio.error_path_not_found()
             self.state = State.IDLE
             return
 
@@ -108,7 +108,7 @@ class Robot:
         """重新加载 TTS 模型并播报到站音频。"""
         logger.info("退出导航状态 —— 重新加载模型")
         self.synthesizer = SpeechSynthesizer(self._cfg.get("tts", {}))
-        self.audio.final_playing(location)
+        self.audio.arrived(location)
         self.state = State.ARRIVED
 
     # ------------------------------------------------------------------
@@ -116,7 +116,7 @@ class Robot:
     # ------------------------------------------------------------------
 
     def _run_idle(self):
-        self.audio.simple_playing("greeting")
+        self.audio.greeting()
         self.state = State.LISTENING
 
     def _run_listening(self):
@@ -155,7 +155,7 @@ class Robot:
         self.state = State.LISTENING
 
     def _run_confirming(self):
-        self.audio.confirm_playing(self._pending_location)
+        self.audio.confirm(self._pending_location)
         self.state = State.LISTENING  # 下一轮会匹配到 confirm 或重试
 
     def _run_chatting(self):

@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-北京中学国际部（BJEA）校园导览机器人，运行在 **树莓派 5 + Pi OS** 上。全中文语音交互，全本地运行（零 API 依赖）。
+北京中学国际部（BJEA）校园导览机器人，运行在 **树莓派 5 + Pi OS** 上。全中文语音交互。TTS 使用微软 Edge-TTS 免费接口，其余模块全本地运行。
 
 ## 开发工作流
 
@@ -85,12 +85,12 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
 | 模块 | 功能 |
 |------|------|
 | `speech/recognizer.py` | 静音检测录音 + Whisper.cpp 转写中文 |
-| `speech/synthesizer.py` | Piper ONNX 中文 TTS，在内存中生成 WAV 并播放 |
+| `speech/synthesizer.py` | Edge-TTS 微软免费中文 TTS（subprocess 调 CLI）|
 | `matching/keyword_matcher.py` | 拼音归一化 + RapidFuzz 模糊匹配，支持多意图集，返回置信度 |
 | `llm/fallback.py` | Qwen2.5-0.5B GGUF，llama-cpp-python 推理，`release()`/`reload()` 支持动态生命周期 |
 | `hardware/motor.py` | `MotorController` 抽象接口 + `RPiMotorController`（PWM）+ `MockMotorController`（日志），工厂自动选 |
 | `hardware/sensors.py` | MPU6050 航向 + 编码器里程计，桌面端返回零值自动降级 |
-| `hardware/audio_player.py` | 播放预录制 WAV（playsound），greeting / confirm / final 流程 |
+| `hardware/audio_player.py` | TTS 合成播报，greeting / confirm / arrived 语音流程 |
 | `navigation/navigator.py` | `go_straight(距离)` `turn(角度)` 闭环运动原语 + `follow_route()` 路径执行 |
 | `robot.py` | 8 状态的状态机：IDLE → LISTENING → MATCHING → CONFIRMING/CHATTING → NAVIGATING → ARRIVED |
 
