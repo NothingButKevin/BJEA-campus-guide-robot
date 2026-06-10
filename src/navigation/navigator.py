@@ -32,6 +32,12 @@ class Navigator:
         self._sensors = sensors
         self._routes = self._load_routes(config.get("routes_file", "resources/routes.yaml"))
 
+        # 导航进度（供 GUI 读取）
+        self._current_destination: str = ""
+        self._current_step: int = 0
+        self._total_steps: int = 0
+        self._current_action: str = ""
+
     # ------------------------------------------------------------------
     @staticmethod
     def _load_routes(path: str) -> dict:
@@ -126,8 +132,14 @@ class Navigator:
 
         logger.info("导航器: 开始执行路径 '%s'（共 %d 步）", route_name, len(steps))
 
+        self._current_destination = route_name
+        self._current_step = 0
+        self._total_steps = len(steps)
+
         for i, step in enumerate(steps):
             action = step.get("action", "")
+            self._current_step = i + 1
+            self._current_action = action
             logger.debug("  第 %d/%d 步: %s %s", i + 1, len(steps), action, step)
 
             if action == "go":
@@ -147,3 +159,12 @@ class Navigator:
     def routes(self) -> list[str]:
         """列出所有已知路径名称。"""
         return list(self._routes.keys())
+
+    def get_progress(self) -> dict:
+        """返回当前导航进度（供 GUI 和 CLI 读取）。"""
+        return {
+            "destination": self._current_destination,
+            "step": self._current_step,
+            "total": self._total_steps,
+            "current_action": self._current_action,
+        }

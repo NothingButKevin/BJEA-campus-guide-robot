@@ -29,6 +29,9 @@ class SpeechRecognizer:
         self._whisper = Whisper(self.model_name)
         self._is_running = False
 
+        # 实时音频电平（供 GUI 波形图读取，float 赋值线程安全）
+        self.current_volume: float = 0.0
+
     # ------------------------------------------------------------------
     # 内部录音逻辑
     # ------------------------------------------------------------------
@@ -51,6 +54,8 @@ class SpeechRecognizer:
 
             audio_data = np.frombuffer(indata, dtype=np.int16)
             volume = np.abs(audio_data).mean()
+
+            self.current_volume = float(volume)
 
             frames.append(indata.copy())
 
@@ -95,7 +100,11 @@ class SpeechRecognizer:
         """录音并返回转写的中文文本。"""
         self._record_until_silence()
         result = self._whisper.transcribe(self.output_path)
-        text = "".join(self._whisper.extract_text(result))
+        try:
+            text = "".join(self._whisper.extract_text(result))
+        except UnicodeDecodeError:
+            logger.warning("Whisper 转写结果 UTF-8 解码失败，返回空文本")
+            text = ""
         logger.info("识别结果: %s", text)
         return text
 
