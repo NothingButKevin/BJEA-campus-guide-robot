@@ -5,7 +5,7 @@ tts:
   voice: "zh-CN-XiaoxiaoNeural"   # Edge-TTS 中文女声（微软晓晓）
 
 asr:
-  model: "base"
+  model: "iic/SenseVoiceSmall"  # FunASR SenseVoice Small（中文专训）
   silence_threshold: 500        # 静音判定阈值（幅度值）
   silence_duration: 2.5         # 触发停止的静音持续秒数
   sample_rate: 44100

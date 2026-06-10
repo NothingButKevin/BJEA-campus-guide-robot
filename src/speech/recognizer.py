@@ -1,17 +1,18 @@
-"""语音识别模块 —— 基于 Whisper.cpp 的静音检测录音 + 转写。"""
+"""语音识别模块 —— 静音检测录音 + FunASR SenseVoice Small 转写。"""
 
 import logging
 import wave
 
 import numpy as np
 import sounddevice as sd
-from whispercpp import Whisper
+from funasr import AutoModel
+from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 logger = logging.getLogger(__name__)
 
 
 class SpeechRecognizer:
-    """录音直到静音，然后用 Whisper.cpp 转写为中文文本。"""
+    """录音直到静音，然后用 SenseVoice Small 转写为中文文本。"""
 
     def __init__(self, config: dict):
         """
@@ -19,15 +20,21 @@ class SpeechRecognizer:
             config: ASR 配置字典，包含 model, silence_threshold,
                     silence_duration, sample_rate, output_path
         """
-        self.model_name = config["model"]
+        self.model_name = config.get("model", "iic/SenseVoiceSmall")
         self.silence_threshold = config["silence_threshold"]
         self.silence_duration = config["silence_duration"]
         self.sample_rate = config["sample_rate"]
         self.output_path = config["output_path"]
 
-        logger.info("正在加载 Whisper 模型 '%s' ...", self.model_name)
-        self._whisper = Whisper(self.model_name)
+        logger.info("正在加载 SenseVoice 模型 '%s' ...", self.model_name)
+        self._model = AutoModel(
+            model=self.model_name,
+            disable_update=True,
+        )
         self._is_running = False
+
+        # 实时音频电平（供 GUI 波形图读取）
+        self.current_volume: float = 0.0
 
     # ------------------------------------------------------------------
     # 内部录音逻辑
@@ -39,7 +46,6 @@ class SpeechRecognizer:
         返回保存的 WAV 文件路径。
         """
         frames: list = []
-        # 给用户 3 秒缓冲时间，避免还没说话就结束录音
         silent_chunks = -int(self.sample_rate / chunk * 3)
         max_silent_chunks = int(self.sample_rate / chunk * self.silence_duration)
         stop_recording = False
@@ -51,6 +57,8 @@ class SpeechRecognizer:
 
             audio_data = np.frombuffer(indata, dtype=np.int16)
             volume = np.abs(audio_data).mean()
+
+            self.current_volume = float(volume)
 
             frames.append(indata.copy())
 
@@ -94,14 +102,22 @@ class SpeechRecognizer:
     def recognize(self) -> str:
         """录音并返回转写的中文文本。"""
         self._record_until_silence()
-        result = self._whisper.transcribe(self.output_path)
-        text = "".join(self._whisper.extract_text(result))
+        result = self._model.generate(
+            input=self.output_path,
+            language="zh",
+            use_itn=False,
+        )
+        if result and result[0].get("text"):
+            text = rich_transcription_postprocess(result[0]["text"])
+        else:
+            text = ""
         logger.info("识别结果: %s", text)
         return text
 
-    def stop(self):
-        """释放资源（导航前切换模型时调用）。"""
+    def release(self):
+        """释放模型（导航期间腾出内存时调用）。"""
         self._is_running = False
+        self._model = None
 
 
 # ------------------------------------------------------------------
@@ -110,7 +126,7 @@ class SpeechRecognizer:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     cfg = {
-        "model": "base",
+        "model": "iic/SenseVoiceSmall",
         "silence_threshold": 500,
         "silence_duration": 2.5,
         "sample_rate": 44100,

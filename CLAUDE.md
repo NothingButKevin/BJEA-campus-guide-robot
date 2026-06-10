@@ -84,7 +84,7 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
 
 | 模块 | 功能 |
 |------|------|
-| `speech/recognizer.py` | 静音检测录音 + Whisper.cpp 转写中文 |
+| `speech/recognizer.py` | 静音检测录音 + FunASR SenseVoice Small 转写中文 |
 | `speech/synthesizer.py` | Edge-TTS 微软免费中文 TTS（subprocess 调 CLI）|
 | `matching/keyword_matcher.py` | 拼音归一化 + RapidFuzz 模糊匹配，支持多意图集，返回置信度 |
 | `llm/fallback.py` | Qwen2.5-0.5B GGUF，llama-cpp-python 推理，`release()`/`reload()` 支持动态生命周期 |
