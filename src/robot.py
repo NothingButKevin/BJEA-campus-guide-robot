@@ -216,17 +216,34 @@ class Robot:
         wake_secs = self._cfg.get("face_detector", {}).get("wake_seconds", 5)
         self._face_progress = 0.0
 
+        def _should_stop():
+            """检查是否有 shutdown 或 wake 命令。"""
+            try:
+                cmd = self.cmd_queue.get_nowait()
+                if cmd == "shutdown":
+                    return True
+                elif cmd == "wake":
+                    return True
+                else:
+                    self.cmd_queue.put(cmd)  # 放回去
+                    return False
+            except queue.Empty:
+                return False
+
         if self.face_detector.available:
-            self.face_detector.wait_for_face(
+            woke = self.face_detector.wait_for_face(
                 min_seconds=wake_secs,
                 progress_callback=lambda p: setattr(self, '_face_progress', p),
+                stop_check=_should_stop,
             )
         else:
             import time
             time.sleep(0.5)
+            woke = True
 
         self._face_progress = 0.0
-        self.set_state(State.IDLE)
+        if woke:
+            self.set_state(State.IDLE)
 
     def _run_idle(self):
         self.audio.greeting()

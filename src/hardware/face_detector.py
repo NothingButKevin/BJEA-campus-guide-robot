@@ -101,20 +101,25 @@ class FaceDetector:
         self.H.imshow("Face Detection (Debug)", frame)
         self.H.waitKey(1)  # 1ms 刷新，不阻塞
 
-    def wait_for_face(self, min_seconds: float = 5.0, progress_callback=None) -> None:
+    def wait_for_face(self, min_seconds: float = 5.0, progress_callback=None,
+                      stop_check=None) -> bool:
         """阻塞直到连续检测到人脸满 *min_seconds* 秒。
 
-        人脸消失则重新计时。progress_callback(0.0-1.0) 用于 GUI 进度条。
+        人脸消失则重新计时。stop_check() 返回 True 则提前退出。
+        返回 True 表示检测到人脸，False 表示被中断。
         """
         if not self._available:
             logger.info("人脸检测不可用，跳过等待。")
             if progress_callback:
                 progress_callback(1.0)
-            return
+            return True
 
         logger.info("待机中，等待人脸唤醒...")
         accumulated = 0.0
         while accumulated < min_seconds:
+            if stop_check and stop_check():
+                logger.info("人脸检测被中断。")
+                return False
             if self.detect():
                 accumulated += self._interval
             else:
@@ -124,6 +129,7 @@ class FaceDetector:
                 progress_callback(progress)
             time.sleep(self._interval)
         logger.info("检测到人脸 —— 唤醒！")
+        return True
 
     def cleanup(self):
         """释放摄像头资源。"""
