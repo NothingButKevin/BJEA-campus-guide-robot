@@ -26,7 +26,10 @@ class SpeechRecognizer:
         self.output_path = config["output_path"]
 
         logger.info("正在加载 Whisper 模型 '%s' ...", self.model_name)
-        self._whisper = Whisper(self.model_name)
+        try:
+            self._whisper = Whisper(self.model_name)
+        except RuntimeError:
+            self._whisper = Whisper.from_pretrained(self.model_name)
         self._is_running = False
 
         # 实时音频电平（供 GUI 波形图读取，float 赋值线程安全）
