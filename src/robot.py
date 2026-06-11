@@ -221,8 +221,12 @@ class Robot:
             try:
                 cmd = self.cmd_queue.get_nowait()
                 if cmd == "shutdown":
+                    self.set_state(State.SHUTDOWN)
                     return True
                 elif cmd == "wake":
+                    logger.info("CLI 手动唤醒")
+                    self._face_progress = 0.0
+                    self.set_state(State.IDLE)
                     return True
                 else:
                     self.cmd_queue.put(cmd)  # 放回去
