@@ -37,5 +37,38 @@ llm:
   temperature: 0.7
   n_ctx: 512
 
+face_detector:
+  camera_id: 0                  # 摄像头设备 ID
+  scale_factor: 1.1             # 缩放因子（越小越敏感但越慢）
+  min_neighbors: 5              # 最小邻接矩形数（越高误检越少）
+  detection_interval: 0.2       # 检测间隔（秒）
+  wake_seconds: 3               # 持续检测到人脸多少秒后唤醒
+
 navigation:
   routes_file: "resources/routes.yaml"
+
+# ------------------------------------------------------------------
+# UI 配置 —— GUI 脸部 + CLI 控制台
+# ------------------------------------------------------------------
+ui:
+  gui:
+    enabled: true
+    fullscreen: true              # 全屏模式，桌面端可设为 false
+    width: 1024                   # 非全屏时的窗口宽度
+    height: 600                   # 非全屏时的窗口高度
+    fps: 30                       # 刷新率
+    bg_color: "#0d1b2a"          # 背景色（深蓝黑）
+    accent_color: "#4a9eff"      # 强调色（波形图等）
+    text_color: "#c0c0c0"        # 默认文字色
+    subtitle_color: "#ffffff"    # 字幕文字色
+    emoji_dir: "resources/ui/emoji"  # emoji PNG 图片目录
+    emoji_scale: 0.40            # emoji 占屏幕高度的比例
+    cursor_visible: true         # 是否显示鼠标光标（桌面开发建议 true）
+    waveform:
+      bars: 32                   # 频谱竖条数量
+      color: "#4a9eff"          # 波形底色
+      peak_color: "#00ff88"     # 峰值颜色
+  cli:
+    enabled: true
+    color_output: true           # 彩色终端输出
+    history_size: 1000           # 命令历史条数

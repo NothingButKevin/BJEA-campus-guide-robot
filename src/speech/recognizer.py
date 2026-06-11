@@ -33,7 +33,7 @@ class SpeechRecognizer:
         )
         self._is_running = False
 
-        # 实时音频电平（供 GUI 波形图读取）
+        # 实时音频电平（供 GUI 波形图读取，float 赋值线程安全）
         self.current_volume: float = 0.0
 
     # ------------------------------------------------------------------
