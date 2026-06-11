@@ -11,6 +11,7 @@ from enum import Enum, auto
 import yaml
 
 from hardware.audio_player import AudioPlayer
+from hardware.face_detector import FaceDetector
 from hardware.motor import MotorController, create_motor
 from hardware.sensors import Sensors
 from llm.fallback import LLMFallback
@@ -23,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class State(Enum):
-    IDLE = auto()          # 空闲，等待启动
+    STANDBY = auto()       # 待机中，等待人脸唤醒
+    IDLE = auto()          # 空闲，准备问候
     LISTENING = auto()     # 正在听用户说话
     MATCHING = auto()      # 匹配用户输入
     CONFIRMING = auto()    # 确认目的地
@@ -64,6 +66,7 @@ class Robot:
         self.motor = create_motor(self._cfg.get("motor", {}))
         self.sensors = Sensors(self._cfg.get("sensors", {}))
         self.navigator = Navigator(self.motor, self.sensors, self._cfg.get("navigation", {}))
+        self.face_detector = FaceDetector(self._cfg.get("face_detector", {}))
 
         # LLM 在第一次兜底时懒加载，也可预加载
         self._llm: LLMFallback | None = None
@@ -75,9 +78,10 @@ class Robot:
         # --- GUI 共享数据（原子读取）-----------------------------------
         self._current_speech: str = ""       # 当前 TTS 播报文字（GUI 字幕）
         self._last_recognized_text: str = ""  # 最近一次语音识别结果
+        self._face_progress: float = 0.0     # 人脸检测进度 0.0–1.0（GUI 进度条）
 
         # --- 状态 ------------------------------------------------------
-        self.state = State.IDLE
+        self.state = State.STANDBY
         self._pending_location: str | None = None
         self._last_user_input: str = ""
 
@@ -122,8 +126,14 @@ class Robot:
             print(f"  目的地: {self._pending_location or '(无)'}")
             print(f"  最近识别: {self._last_recognized_text or '(无)'}")
             return True
+        elif cmd in ("w", "wake"):
+            if self.state == State.STANDBY:
+                self.cmd_queue.put("wake")
+            else:
+                print("仅在待机状态下可手动唤醒")
+            return True
         elif cmd in ("h", "help"):
-            print("命令: y(确认) n(取消) s(状态) d(调试) l(日志) q(退出) h(帮助)")
+            print("命令: y(确认) n(取消) s(状态) d(调试) l(日志) w(唤醒) q(退出) h(帮助)")
             return True
         elif cmd in ("l", "log"):
             root = logging.getLogger()
@@ -137,6 +147,7 @@ class Robot:
             print(f"Synthesizer: loaded={getattr(self.synthesizer, '_loaded', '?')}")
             print(f"LLM        : loaded={self._llm is not None}")
             print(f"Motor      : type={type(self.motor).__name__}")
+            print(f"FaceDetect : {'available' if self.face_detector.available else 'disabled'}")
             return True
 
         return False  # 未识别的命令
@@ -185,6 +196,37 @@ class Robot:
     # ------------------------------------------------------------------
     # 状态处理函数
     # ------------------------------------------------------------------
+
+    def _run_standby(self):
+        """待机：等待人脸检测或 CLI 'w' 唤醒。"""
+        # 检查 CLI 手动唤醒
+        try:
+            cmd = self.cmd_queue.get_nowait()
+            if cmd == "wake":
+                logger.info("CLI 手动唤醒")
+                self._face_progress = 0.0
+                self.set_state(State.IDLE)
+                return
+            elif cmd == "shutdown":
+                self.set_state(State.SHUTDOWN)
+                return
+        except queue.Empty:
+            pass
+
+        wake_secs = self._cfg.get("face_detector", {}).get("wake_seconds", 5)
+        self._face_progress = 0.0
+
+        if self.face_detector.available:
+            self.face_detector.wait_for_face(
+                min_seconds=wake_secs,
+                progress_callback=lambda p: setattr(self, '_face_progress', p),
+            )
+        else:
+            import time
+            time.sleep(0.5)
+
+        self._face_progress = 0.0
+        self.set_state(State.IDLE)
 
     def _run_idle(self):
         self.audio.simple_playing("greeting")
@@ -273,7 +315,7 @@ class Robot:
         self.set_state(State.LISTENING)
 
     def _run_arrived(self):
-        self.set_state(State.IDLE)
+        self.set_state(State.STANDBY)
         self._pending_location = None
 
     # ------------------------------------------------------------------
@@ -296,6 +338,7 @@ class Robot:
                     pass
 
                 handler = {
+                    State.STANDBY:    self._run_standby,
                     State.IDLE:       self._run_idle,
                     State.LISTENING:  self._run_listening,
                     State.MATCHING:   self._run_matching,

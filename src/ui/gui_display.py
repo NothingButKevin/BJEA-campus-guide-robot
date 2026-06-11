@@ -24,6 +24,7 @@ _FALLBACK_EMOJI = {
     "NAVIGATING": "🚗",
     "ARRIVED": "🎉",
     "SHUTDOWN": "😴",
+    "STANDBY": "😴",
 }
 
 
@@ -170,6 +171,7 @@ class RobotFace(tk.Tk):
         self._last_state_name: str = ""
         self._last_speech = ""
         self._content_mode: str = ""  # 当前下部显示的布局模式，避免每帧重布局
+        self._smooth_progress: float = 0.0  # 插值后的进度条值
 
     # ------------------------------------------------------------------
     # 字体加载
@@ -237,6 +239,7 @@ class RobotFace(tk.Tk):
             "NAVIGATING": "navigating",
             "ARRIVED": "arrived",
             "SHUTDOWN": "shutdown",
+            "STANDBY": "shutdown",  # 复用睡眠脸
         }
         return mapping.get(state_name, "idle")
 
@@ -259,6 +262,7 @@ class RobotFace(tk.Tk):
         self._emoji_frame.grid_rowconfigure(0, weight=1)
         self._emoji_frame.grid_columnconfigure(0, weight=1)
 
+        # Emoji Label
         self._emoji_label = tk.Label(
             self._emoji_frame,
             bg=bg,
@@ -304,6 +308,14 @@ class RobotFace(tk.Tk):
             wraplength=self.winfo_screenwidth() * 0.85,
             text="",
             justify="center",
+        )
+
+        # 进度条 Canvas（STANDBY 时显示）
+        self._progress_canvas = tk.Canvas(
+            self._content_frame,
+            bg=bg,
+            highlightthickness=0,
+            height=20,
         )
 
         # 默认显示 idle 状态
@@ -359,8 +371,10 @@ class RobotFace(tk.Tk):
     @staticmethod
     def _mode_for_state(state_name: str) -> str:
         """将状态名映射到布局模式。"""
-        if state_name == "LISTENING":
+        if state_name in ("LISTENING",):
             return "waveform"
+        elif state_name in ("STANDBY",):
+            return "standby"
         elif state_name == "NAVIGATING":
             return "dual"      # 双行：标题 + 进度
         elif state_name == "CONFIRMING":
@@ -377,11 +391,17 @@ class RobotFace(tk.Tk):
         # 离开波形图模式时重置频谱历史
         if self._content_mode == "waveform" and mode != "waveform":
             self._waveform.reset()
+        # 进入待机模式时重置进度条
+        if mode == "standby" and self._content_mode != "standby":
+            self._smooth_progress = 0.0
 
         self._hide_all_content()
 
         if mode == "waveform":
             self._waveform.place(relx=0.5, rely=0.5, relwidth=0.95, relheight=0.8, anchor="center")
+        elif mode == "standby":
+            self._subtitle_label.place(relx=0.5, rely=0.35, anchor="center")
+            self._progress_canvas.place(relx=0.5, rely=0.6, relwidth=0.5, height=20, anchor="center")
         elif mode == "dual":
             self._subtitle_label.place(relx=0.5, rely=0.35, anchor="center")
             self._info_label.place(relx=0.5, rely=0.6, anchor="center")
@@ -416,6 +436,16 @@ class RobotFace(tk.Tk):
         elif state_name in ("IDLE",):
             self._subtitle_label.config(text="你好！请问要去哪里？")
 
+        elif state_name == "STANDBY":
+            target = self._robot._face_progress if self._robot else 0.0
+            if target == 0.0:
+                self._smooth_progress = 0.0
+            else:
+                self._smooth_progress += (target - self._smooth_progress) * 0.15
+            self._subtitle_label.config(text="待机中，请正对屏幕激活我")
+            self._draw_progress_bar(self._smooth_progress)
+            if self._robot and self._robot.face_detector._debug:
+                self._robot.face_detector.show_debug_window()
         elif state_name == "SHUTDOWN":
             self._subtitle_label.config(text="再见！")
 
@@ -468,11 +498,29 @@ class RobotFace(tk.Tk):
     # 状态 → 内容切换
     # ------------------------------------------------------------------
 
+    def _draw_progress_bar(self, progress: float):
+        """绘制水平进度条。"""
+        c = self._progress_canvas
+        c.delete("all")
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w < 10 or h < 10:
+            return
+        # 背景轨道
+        c.create_rectangle(0, 0, w, h, fill="#1a2a3e", outline="")
+        # 填充
+        fill_w = int(w * progress)
+        if fill_w > 0:
+            accent = self._cfg.get("accent_color", "#4a9eff")
+            c.create_rectangle(0, 0, fill_w, h, fill=accent, outline="")
+            c.create_rectangle(0, 0, fill_w, h // 3, fill="#6ab4ff", outline="")
+
     def _hide_all_content(self):
         """隐藏下部所有内容组件。"""
         self._waveform.place_forget()
         self._subtitle_label.place_forget()
         self._info_label.place_forget()
+        self._progress_canvas.place_forget()
 
     # ------------------------------------------------------------------
     # Emoji 更新
@@ -482,12 +530,10 @@ class RobotFace(tk.Tk):
         """切换 emoji 显示。"""
         emoji_key = self._get_emoji_for_state(state_name)
 
-        # 尝试用 PNG 图片
         if emoji_key in self._emoji_cache and self._emoji_cache[emoji_key] is not None:
             self._emoji_label.config(image=self._emoji_cache[emoji_key], text="")
             return
 
-        # 回退到 Unicode 字符
         fallback_char = _FALLBACK_EMOJI.get(state_name, "🤖")
         self._emoji_label.config(image="", text=fallback_char)
 

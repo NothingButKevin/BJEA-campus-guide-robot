@@ -38,6 +38,13 @@ llm:
   temperature: 0.7
   n_ctx: 512
 
+face_detector:
+  camera_id: 0                  # 摄像头设备 ID
+  scale_factor: 1.1             # 缩放因子（越小越敏感但越慢）
+  min_neighbors: 5              # 最小邻接矩形数（越高误检越少）
+  detection_interval: 0.2       # 检测间隔（秒）
+  wake_seconds: 3               # 持续检测到人脸多少秒后唤醒
+
 navigation:
   routes_file: "resources/routes.yaml"
 

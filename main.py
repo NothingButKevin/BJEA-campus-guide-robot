@@ -149,6 +149,7 @@ def run_navigation(config_path: str, enable_gui: bool = True, enable_cli: bool =
     ui_cfg["cursor_visible"] = show_cursor
 
     robot = Robot(config_path)
+    robot.face_detector._debug = debug  # 调试模式：启用摄像头预览窗口
 
     gui: RobotFace | None = None
     cli: CLIConsole | None = None
