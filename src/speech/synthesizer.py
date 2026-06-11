@@ -41,6 +41,9 @@ class SpeechSynthesizer:
                 timeout=30,
                 check=True,
             )
+        except FileNotFoundError:
+            logger.error("edge-tts 未安装，请执行: pip install edge-tts")
+            return
         except subprocess.CalledProcessError as e:
             logger.error("Edge-TTS 合成失败: %s", e.stderr.decode(errors="replace"))
             return

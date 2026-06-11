@@ -250,7 +250,10 @@ class Robot:
             self.set_state(State.IDLE)
 
     def _run_idle(self):
-        self.audio.greeting()
+        try:
+            self.audio.greeting()
+        except Exception:
+            logger.exception("TTS 播放失败，继续静音运行")
         self.set_state(State.LISTENING)
 
     def _run_listening(self):
