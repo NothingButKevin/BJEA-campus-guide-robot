@@ -12,7 +12,12 @@ _CASCADE_PATH = "haarcascade_frontalface_default.xml"
 
 
 class FaceDetector:
-    """使用摄像头 + OpenCV Haar 级联检测人脸。"""
+    """使用摄像头 + OpenCV Haar 级联检测人脸。
+
+    后端兼容：
+    - OpenCV VideoCapture（USB 摄像头 / 桌面端）
+    - picamera2（树莓派 5 CSI 摄像头）
+    """
 
     H = None
 
@@ -23,38 +28,62 @@ class FaceDetector:
         self._interval = config.get("detection_interval", 0.2)
         self._debug = debug
 
-        self._cap = None
+        self._cap = None           # OpenCV VideoCapture
+        self._picam2 = None        # picamera2.Picamera2
+        self._backend = None       # 'opencv' | 'picamera2'
         self._classifier = None
-        self._last_frame = None  # debug 模式缓存最近一帧
-        self._last_faces = None  # debug 模式缓存最近的人脸坐标
+        self._last_frame = None    # debug 模式缓存最近一帧
+        self._last_faces = None    # debug 模式缓存最近的人脸坐标
         self._available = self._init_camera()
 
     # ------------------------------------------------------------------
     def _init_camera(self) -> bool:
         """初始化摄像头和级联分类器。返回是否可用。"""
+        # 1) 加载 OpenCV + Haar 级联
         try:
             import cv2
             self.H = cv2
-
             self._classifier = cv2.CascadeClassifier(
                 cv2.data.haarcascades + _CASCADE_PATH
             )
             if self._classifier.empty():
                 logger.error("Haar 级联模型加载失败")
                 return False
-
-            self._cap = cv2.VideoCapture(self._camera_id)
-            if not self._cap.isOpened():
-                logger.warning("无法打开摄像头 %d", self._camera_id)
-                return False
-
-            logger.info("人脸检测器就绪（camera=%d）", self._camera_id)
-            return True
         except Exception:
             logger.warning("OpenCV 不可用，人脸检测已禁用。使用 CLI 'w' 手动唤醒。")
             return False
+
+        # 2) 尝试 OpenCV VideoCapture（USB 摄像头）
+        self._cap = cv2.VideoCapture(self._camera_id)
+        if self._cap.isOpened():
+            ret, _ = self._cap.read()
+            if ret:
+                self._backend = "opencv"
+                logger.info("人脸检测器就绪（OpenCV, camera=%d）", self._camera_id)
+                return True
+            logger.debug("OpenCV 摄像头打开但无法读取帧，尝试 picamera2 …")
+            self._cap.release()
+            self._cap = None
+
+        # 3) 尝试 picamera2（树莓派 5 CSI 摄像头）
+        try:
+            from picamera2 import Picamera2
+
+            self._picam2 = Picamera2()
+            config = self._picam2.create_still_configuration(
+                main={"size": (640, 480)},
+                lores={"size": (320, 240)},
+                display="lores",
+            )
+            self._picam2.configure(config)
+            self._picam2.start()
+            # 给传感器几帧预热
+            time.sleep(0.3)
+            self._backend = "picamera2"
+            logger.info("人脸检测器就绪（picamera2）")
+            return True
         except Exception as e:
-            logger.warning("人脸检测器初始化失败: %s", e)
+            logger.warning("摄像头初始化失败: %s", e)
             return False
 
     # ------------------------------------------------------------------
@@ -67,8 +96,8 @@ class FaceDetector:
         if not self._available:
             return False
 
-        ret, frame = self._cap.read()
-        if not ret:
+        frame = self._get_frame()
+        if frame is None:
             return False
 
         gray = self.H.cvtColor(frame, self.H.COLOR_BGR2GRAY)
@@ -79,12 +108,33 @@ class FaceDetector:
             minSize=(80, 80),
         )
 
-        # debug: 缓存帧和人脸坐标供预览窗口
         if self._debug:
             self._last_frame = frame.copy()
             self._last_faces = faces
 
         return len(faces) > 0
+
+    def _get_frame(self):
+        """从当前后端获取一帧 BGR 图像。"""
+        if self._backend == "opencv":
+            ret, frame = self._cap.read()
+            return frame if ret else None
+
+        if self._backend == "picamera2":
+            try:
+                # picamera2 返回 RGB，转 BGR 给 OpenCV
+                frame = self._picam2.capture_array("lores")
+                if frame is not None:
+                    frame = self.H.cvtColor(frame, self.H.COLOR_RGB2BGR)
+                return frame
+            except Exception:
+                return None
+
+        return None
+
+    # ------------------------------------------------------------------
+    # debug 预览窗口
+    # ------------------------------------------------------------------
 
     def show_debug_window(self):
         """调试用：在 OpenCV 窗口中显示摄像头画面 + 人脸框。"""
@@ -94,12 +144,16 @@ class FaceDetector:
             return
 
         frame = self._last_frame.copy()
-        if self._last_faces is not None:  # 注意: 空 tuple 也是 True
+        if self._last_faces is not None and len(self._last_faces) > 0:
             for (x, y, w, h) in self._last_faces:
                 self.H.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
         self.H.imshow("Face Detection (Debug)", frame)
-        self.H.waitKey(1)  # 1ms 刷新，不阻塞
+        self.H.waitKey(1)
+
+    # ------------------------------------------------------------------
+    # 等待人脸唤醒
+    # ------------------------------------------------------------------
 
     def wait_for_face(self, min_seconds: float = 5.0, progress_callback=None,
                       stop_check=None) -> bool:
@@ -131,9 +185,18 @@ class FaceDetector:
         logger.info("检测到人脸 —— 唤醒！")
         return True
 
+    # ------------------------------------------------------------------
     def cleanup(self):
         """释放摄像头资源。"""
-        if self._cap is not None:
+        if self._backend == "opencv" and self._cap is not None:
             self._cap.release()
+        if self._backend == "picamera2" and self._picam2 is not None:
+            try:
+                self._picam2.stop()
+            except Exception:
+                pass
         if self._debug and self.H is not None:
-            self.H.destroyWindow("Face Detection (Debug)")
+            try:
+                self.H.destroyWindow("Face Detection (Debug)")
+            except Exception:
+                pass
