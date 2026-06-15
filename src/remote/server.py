@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 # ── 常量 ──
 _MOVE_SPEED = 0.3       # 直行速度
-_TURN_SPEED = 0.15      # 转弯行进速度（低速）
 _STEER_ANGLE = 0.5      # 转弯舵量
 _CMD_TIMEOUT = 2.0      # 看门狗超时（秒），超时自动停止
 
@@ -99,8 +98,9 @@ class RemoteControlHandler(BaseHTTPRequestHandler):
             return
 
         # ── 动作分发 ──
-        # 注意：forward/backward 为纯直线运动，必须先回中转向，
-        # 否则上一次转向的舵机信号会残留在 GPIO17 上导致跑偏。
+        # 驱动板混控：左轮 = 油门 + 转向，右轮 = 油门 - 转向。
+        # 油门和转向不可同时非零，否则混控非线性叠加导致异常。
+        # 匹配 demo.py 已验证模式：直行只给油门，转弯只给转向。
         if action == "forward":
             motor.center_steering()
             motor.forward(_MOVE_SPEED)
@@ -108,11 +108,11 @@ class RemoteControlHandler(BaseHTTPRequestHandler):
             motor.center_steering()
             motor.backward(_MOVE_SPEED)
         elif action == "left":
+            motor.stop()            # 油门回中
             motor.steer(-_STEER_ANGLE)
-            motor.forward(_TURN_SPEED)
         elif action == "right":
+            motor.stop()            # 油门回中
             motor.steer(_STEER_ANGLE)
-            motor.forward(_TURN_SPEED)
         elif action == "stop":
             motor.stop()
             motor.center_steering()
