@@ -3,7 +3,7 @@ gpiozero==2.0.1
 edge-tts>=7.0.0
 mpu6050==0.0.3
 numpy==2.4.6
-opencv_python==4.9.0.80
+opencv_python>=4.10
 Pillow==12.2.0
 pytest==7.4.0
 PyYAML==6.0.3
