@@ -61,56 +61,35 @@ def interactive_setup() -> dict:
     print(f"{C['bold']}BJEA 校园导览机器人 — 启动配置{C['reset']}")
     print("-" * 40)
 
-    # Q1: 环境
-    print(f"\n{C['cyan']}1. 运行环境？{C['reset']}")
-    print("   [1] Mac 开发")
-    print("   [2] 树莓派（有屏幕）")
-    print("   [3] 树莓派（SSH 远程）")
-    env = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2", "3"})
+    enable_gui = _can_show_gui()
+    fullscreen = False
+    show_cursor = True
+    debug = False
 
-    if env == "3":
-        # SSH — 无 GUI，仅 CLI
-        enable_gui = False
-        enable_cli = True
-        fullscreen = False
-        show_cursor = True
-    elif env == "2":
-        enable_gui = True
-        enable_cli = False
-        fullscreen = True
-        show_cursor = False
-    else:  # "1" or default
-        enable_gui = _can_show_gui()
-        enable_cli = True
-        fullscreen = False
-        show_cursor = True
+    # Q1: 全屏 / 窗口（仅 GUI 可用时）
+    if enable_gui:
+        print(f"\n{C['cyan']}1. 显示模式？{C['reset']}")
+        print("   [1] 窗口模式")
+        print("   [2] 全屏模式")
+        ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
+        fullscreen = ans == "2"
+        show_cursor = not fullscreen
 
-    # Q2: 模式
+    # Q2: 调试模式
     print(f"\n{C['cyan']}2. 运行模式？{C['reset']}")
     print("   [1] 正常运行")
     print("   [2] 调试运行（详细日志 + 模块诊断）")
-    mode = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
-    debug = mode == "2"
+    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
+    debug = ans == "2"
 
-    # Q3: GUI（仅在非 SSH 且有 display 时问）
-    if env != "3" and _can_show_gui():
-        default_gui = "y" if enable_gui else "n"
-        ans = _ask(
-            f"\n{C['cyan']}3. 启动 GUI 脸部？{C['reset']} ({C['yellow']}y{C['reset']}/n) [{default_gui}]: ",
-            default_gui,
-            {"y", "n", "yes", "no"},
-        )
-        enable_gui = ans.startswith("y")
-
-    # CLI 始终启动（刚性要求）
+    # CLI 始终启动
     enable_cli = True
 
     # ── 摘要 ──
     print(f"\n{C['bold']}══════════════════{C['reset']}")
-    print(f"  环境       : {['Mac 开发', '树莓派', 'SSH 远程'][int(env)-1]}")
+    print(f"  GUI 脸部   : {'全屏' if fullscreen else '窗口' if enable_gui else '关闭'}")
     print(f"  模式       : {'调试' if debug else '正常'}")
-    print(f"  GUI 脸部   : {'开启' if enable_gui else '关闭'}")
-    print(f"  CLI 控制台 : 开启（始终）")
+    print(f"  CLI 控制台 : 开启")
     print(f"{C['bold']}══════════════════{C['reset']}")
     _ask(f"\n{C['yellow']}按 Enter 启动...{C['reset']}", "")
 
