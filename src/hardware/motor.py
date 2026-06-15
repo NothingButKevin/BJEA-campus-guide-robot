@@ -43,27 +43,35 @@ class MotorController(ABC):
 # ------------------------------------------------------------------
 
 class RPiMotorController(MotorController):
-    """PWM 控制的车用底盘，使用 gpiozero + lgpio 后端。
+    """PWM 控制的车用底盘，使用 gpiozero PWMOutputDevice + lgpio 后端。
 
     硬件接线（差分混控驱动板）：:
 
-        - **油门引脚**（drive_pin，GPIO27）：>7.5% 占空比 = 双轮前进，
-          7.5% = 停止，<7.5% = 双轮后退。
-        - **转向引脚**（steer_pin，GPIO17）：>7.5% = 右转（左前右后），
-          7.5% = 直行，<7.5% = 左转（左后右前）。
+        - **油门引脚**（drive_pin，GPIO27）：7.5% 占空比 = 停止，
+          >7.5% = 双轮前进，<7.5% = 双轮后退。
+        - **转向引脚**（steer_pin，GPIO17）：7.5% 占空比 = 直行，
+          >7.5% = 右转（左前右后），<7.5% = 左转（左后右前）。
 
     驱动板内置混控，最终输出为::
 
         左轮 = 油门 + 转向
         右轮 = 油门 - 转向
 
-    因此两个 Servo 信号叠加后即可实现差速转向。
+    占空比范围：5%（全速后退/左转）… 7.5%（中立）… 10%（全速前进/右转）。
+    使用 PWMOutputDevice 直接设置占空比（绕过 gpiozero Servo 的 -1…1 抽象，
+    避免 Pi 5 lgpio 下 Servo.value 到 1.5ms 中位的映射偏差）。
 
     .. 注意::
 
         Pi 5 必须设置 ``GPIOZERO_PIN_FACTORY=lgpio``（构造函数自动处理），
         否则 gpiozero 回退到 RPi.GPIO 软件 PWM，在 RP1 芯片上不工作。
     """
+
+    # 占空比边界
+    _DUTY_NEUTRAL = 0.075   # 7.5% — 中立（停止 / 直行）
+    _DUTY_MAX     = 0.100   # 10% — 全速前进 / 右满舵
+    _DUTY_MIN     = 0.050   # 5%  — 全速后退 / 左满舵
+    _DUTY_SPAN    = _DUTY_MAX - _DUTY_NEUTRAL  # 0.025 — 从中立到全速的范围
 
     def __init__(self, config: dict):
         import os
@@ -72,40 +80,43 @@ class RPiMotorController(MotorController):
         if "GPIOZERO_PIN_FACTORY" not in os.environ:
             os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"
 
-        from gpiozero import Servo
+        from gpiozero import PWMOutputDevice
 
-        self._throttle = Servo(config["drive_pin"])   # GPIO27 → 油门
-        self._steering = Servo(config["steer_pin"])   # GPIO17 → 转向
+        self._throttle = PWMOutputDevice(config["drive_pin"], frequency=50)
+        self._steering = PWMOutputDevice(config["steer_pin"], frequency=50)
 
-        # 初始化为中位信号（value=0 对应 1.5ms / 7.5% 脉冲）
-        self._throttle.value = 0
-        self._steering.value = 0
+        # 初始化为中位信号（7.5% 占空比 = 1.5ms 脉冲）
+        self._throttle.value = self._DUTY_NEUTRAL
+        self._steering.value = self._DUTY_NEUTRAL
 
         logger.info(
-            "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d）",
+            "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d, 占空比 %.1f%%–%.1f%%–%.1f%%）",
             config["drive_pin"],
             config["steer_pin"],
+            self._DUTY_MIN * 100,
+            self._DUTY_NEUTRAL * 100,
+            self._DUTY_MAX * 100,
         )
 
     def forward(self, speed: float = 0.3):
-        """前进，*speed* 0.0–1.0，油门输出 1.5–1.6ms 脉冲。"""
-        self._throttle.value = speed * 0.2
+        """前进，*speed* 0.0–1.0，占空比 7.5%–10%。"""
+        self._throttle.value = self._DUTY_NEUTRAL + speed * self._DUTY_SPAN
 
     def backward(self, speed: float = 0.3):
-        """后退，*speed* 0.0–1.0，油门输出 1.5–1.4ms 脉冲。"""
-        self._throttle.value = -speed * 0.2
+        """后退，*speed* 0.0–1.0，占空比 7.5%–5%。"""
+        self._throttle.value = self._DUTY_NEUTRAL - speed * self._DUTY_SPAN
 
     def stop(self):
-        """油门回中（1.5ms 脉冲 = 停止）。"""
-        self._throttle.value = 0
+        """油门回中（7.5% 占空比 = 停止）。"""
+        self._throttle.value = self._DUTY_NEUTRAL
 
     def steer(self, value: float):
-        """转向：-1.0（左转） … 1.0（右转），中位 = 1.5ms 脉冲。"""
-        self._steering.value = value * 0.2
+        """转向：-1.0（左转） … 1.0（右转），中位 = 7.5% 占空比。"""
+        self._steering.value = self._DUTY_NEUTRAL + value * self._DUTY_SPAN
 
     def center_steering(self):
         """转向回中。"""
-        self._steering.value = 0
+        self._steering.value = self._DUTY_NEUTRAL
 
     def cleanup(self):
         """释放 PWM 资源。"""
@@ -147,7 +158,7 @@ class MockMotorController(MotorController):
 def create_motor(config: dict) -> MotorController:
     """根据当前平台自动选择电机控制器实现。"""
     try:
-        from gpiozero import Servo  # noqa: F401
+        from gpiozero import PWMOutputDevice  # noqa: F401
 
         return RPiMotorController(config)
     except ImportError:
