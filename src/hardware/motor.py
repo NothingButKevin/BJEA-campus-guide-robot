@@ -39,11 +39,11 @@ class MotorController(ABC):
 
 
 # ------------------------------------------------------------------
-# 树莓派实现（通过 gpiozero + lgpio 输出 PWM，兼容 Pi 5 的 RP1 芯片）
+# 树莓派实现（通过 lgpio 直接输出 50Hz PWM，兼容 Pi 5 的 RP1 芯片）
 # ------------------------------------------------------------------
 
 class RPiMotorController(MotorController):
-    """PWM 控制的车用底盘，使用 gpiozero Servo + lgpio 后端。
+    """PWM 控制的车用底盘，使用 lgpio 直接输出 50Hz 舵机信号。
 
     硬件接线（差分混控驱动板）：:
 
@@ -57,30 +57,31 @@ class RPiMotorController(MotorController):
         左轮 = 油门 + 转向
         右轮 = 油门 - 转向
 
-    使用 gpiozero ``Servo`` 类（value=-1…1 映射 1–2ms 脉冲，0 对应 1.5ms 中立），
-    经实车验证 Pi 5 + lgpio 下输出正确。
+    lgpio 直接输出 50Hz 方波，占空比 5%（后退/左转）… 10%（前进/右转），
+    7.5% 为中立点。实车验证 Pi 5 RP1 芯片下稳定工作。
 
     .. 注意::
 
-        Pi 5 必须设置 ``GPIOZERO_PIN_FACTORY=lgpio``（构造函数自动处理），
-        否则 gpiozero 回退到 RPi.GPIO 软件 PWM，在 RP1 芯片上不工作。
+        需要 root 权限访问 /dev/gpiochip0。
     """
 
+    _NEUTRAL = 7.5   # 中立（停止 / 直行）
+    _MAX_FWD = 10.0  # 全速前进 / 右满舵
+    _MAX_REV = 5.0   # 全速后退 / 左满舵
+
     def __init__(self, config: dict):
-        import os
+        import lgpio
 
-        # Pi 5（RP1 芯片）需要 lgpio 后端，否则 PWM 无输出
-        if "GPIOZERO_PIN_FACTORY" not in os.environ:
-            os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"
+        self._chip = lgpio.gpiochip_open(0)
+        self._drive_pin = config["drive_pin"]
+        self._steer_pin = config["steer_pin"]
 
-        from gpiozero import Servo
+        lgpio.gpio_claim_output(self._chip, self._drive_pin)
+        lgpio.gpio_claim_output(self._chip, self._steer_pin)
 
-        self._throttle = Servo(config["drive_pin"])   # GPIO27 → 油门
-        self._steering = Servo(config["steer_pin"])   # GPIO17 → 转向
-
-        # 初始化为中位信号（value=0 对应 1.5ms / 7.5% 脉冲）
-        self._throttle.value = 0
-        self._steering.value = 0
+        # 初始化为中位信号（7.5% 占空比）
+        lgpio.tx_pwm(self._chip, self._drive_pin, 50, self._NEUTRAL)
+        lgpio.tx_pwm(self._chip, self._steer_pin, 50, self._NEUTRAL)
 
         logger.info(
             "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d）",
@@ -90,28 +91,36 @@ class RPiMotorController(MotorController):
 
     def forward(self, speed: float = 0.3):
         """前进，*speed* 0.0–1.0。"""
-        self._throttle.value = speed * 0.2
+        duty = self._NEUTRAL + speed * (self._MAX_FWD - self._NEUTRAL)
+        lgpio.tx_pwm(self._chip, self._drive_pin, 50, duty)
 
     def backward(self, speed: float = 0.3):
         """后退，*speed* 0.0–1.0。"""
-        self._throttle.value = -speed * 0.2
+        duty = self._NEUTRAL - speed * (self._NEUTRAL - self._MAX_REV)
+        lgpio.tx_pwm(self._chip, self._drive_pin, 50, duty)
 
     def stop(self):
-        """油门回中（1.5ms 脉冲 = 停止）。"""
-        self._throttle.value = 0
+        """油门回中（7.5% = 停止）。"""
+        lgpio.tx_pwm(self._chip, self._drive_pin, 50, self._NEUTRAL)
 
     def steer(self, value: float):
         """转向：-1.0（左转） … 1.0（右转）。"""
-        self._steering.value = value * 0.2
+        duty = self._NEUTRAL + value * (self._MAX_FWD - self._NEUTRAL)
+        lgpio.tx_pwm(self._chip, self._steer_pin, 50, duty)
 
     def center_steering(self):
         """转向回中。"""
-        self._steering.value = 0
+        lgpio.tx_pwm(self._chip, self._steer_pin, 50, self._NEUTRAL)
 
     def cleanup(self):
-        """释放 PWM 资源。"""
-        self._throttle.close()
-        self._steering.close()
+        """释放 GPIO 资源。"""
+        import lgpio
+
+        lgpio.tx_pwm(self._chip, self._drive_pin, 0, 0)
+        lgpio.tx_pwm(self._chip, self._steer_pin, 0, 0)
+        lgpio.gpio_free(self._chip, self._drive_pin)
+        lgpio.gpio_free(self._chip, self._steer_pin)
+        lgpio.gpiochip_close(self._chip)
 
 
 # ------------------------------------------------------------------
@@ -146,17 +155,11 @@ class MockMotorController(MotorController):
 # ------------------------------------------------------------------
 
 def create_motor(config: dict) -> MotorController:
-    """根据当前平台自动选择电机控制器实现。
-
-    Pi 5 必须使用 lgpio 后端——环境变量必须在 gpiozero 首次导入前设置。
-    """
-    import os
-    os.environ.setdefault("GPIOZERO_PIN_FACTORY", "lgpio")
-
+    """根据当前平台自动选择电机控制器实现。"""
     try:
-        from gpiozero import Servo  # noqa: F401
+        import lgpio  # noqa: F401
 
         return RPiMotorController(config)
     except ImportError:
-        logger.info("gpiozero 不可用 —— 使用 Mock 电机控制器")
+        logger.info("lgpio 不可用 —— 使用 Mock 电机控制器")
         return MockMotorController()
