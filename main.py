@@ -10,7 +10,6 @@
 
 import argparse
 import logging
-import os
 import signal
 import sys
 import threading
@@ -39,15 +38,6 @@ def _ask(prompt: str, default: str = "", valid: set = None) -> str:
         print(f"  非法输入「{raw}」，请重试。")
 
 
-def _can_show_gui() -> bool:
-    """检测是否有图形显示器可用（不创建 Tk 实例，避免干扰后续 GUI）。"""
-    if sys.platform == "darwin":
-        return True  # Mac 始终有显示器
-    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-        return True
-    return False
-
-
 def interactive_setup() -> dict:
     """交互式问答，返回运行配置 dict。"""
 
@@ -61,35 +51,30 @@ def interactive_setup() -> dict:
     print(f"{C['bold']}BJEA 校园导览机器人 — 启动配置{C['reset']}")
     print("-" * 40)
 
-    enable_gui = _can_show_gui()
-    fullscreen = False
-    show_cursor = True
-    debug = False
+    # Q1: 显示模式
+    print(f"\n{C['cyan']}1. 显示模式？{C['reset']}")
+    print("   [1] 窗口模式")
+    print("   [2] 全屏模式")
+    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
+    fullscreen = ans == "2"
+    show_cursor = not fullscreen
 
-    # Q1: 全屏 / 窗口（仅 GUI 可用时）
-    if enable_gui:
-        print(f"\n{C['cyan']}1. 显示模式？{C['reset']}")
-        print("   [1] 窗口模式")
-        print("   [2] 全屏模式")
-        ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
-        fullscreen = ans == "2"
-        show_cursor = not fullscreen
-
-    # Q2: 调试模式
+    # Q2: 运行模式
     print(f"\n{C['cyan']}2. 运行模式？{C['reset']}")
     print("   [1] 正常运行")
     print("   [2] 调试运行（详细日志 + 模块诊断）")
-    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
+    print("   [3] 遥控模式（暂未开放）")
+    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2", "3"})
     debug = ans == "2"
+    # TODO: ans == "3" → 遥控模式
 
-    # CLI 始终启动
+    enable_gui = True
     enable_cli = True
 
     # ── 摘要 ──
     print(f"\n{C['bold']}══════════════════{C['reset']}")
-    print(f"  GUI 脸部   : {'全屏' if fullscreen else '窗口' if enable_gui else '关闭'}")
-    print(f"  模式       : {'调试' if debug else '正常'}")
-    print(f"  CLI 控制台 : 开启")
+    print(f"  显示模式   : {'全屏' if fullscreen else '窗口'}")
+    print(f"  运行模式   : {'调试' if debug else '正常'}")
     print(f"{C['bold']}══════════════════{C['reset']}")
     _ask(f"\n{C['yellow']}按 Enter 启动...{C['reset']}", "")
 
