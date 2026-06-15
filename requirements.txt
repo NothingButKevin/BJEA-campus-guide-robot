@@ -14,3 +14,4 @@ soundfile==0.13.1
 torch>=2.0.0
 torchaudio>=2.0.0
 xpinyin==0.7.6
+qrcode>=8.0

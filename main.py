@@ -66,18 +66,19 @@ def interactive_setup() -> dict:
     print(f"\n{C['cyan']}2. 运行模式？{C['reset']}")
     print("   [1] 正常运行")
     print("   [2] 调试运行（详细日志 + 模块诊断）")
-    print("   [3] 遥控模式（暂未开放）")
+    print(f"   {C['green']}[3] 遥控模式{C['reset']}")
     ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2", "3"})
     debug = ans == "2"
-    # TODO: ans == "3" → 遥控模式
+    remote_mode = ans == "3"
 
-    enable_gui = True
-    enable_cli = True
+    enable_gui = not remote_mode
+    enable_cli = not remote_mode
 
     # ── 摘要 ──
+    _mode_label = "遥控" if remote_mode else ("调试" if debug else "正常")
     print(f"\n{C['bold']}══════════════════{C['reset']}")
     print(f"  显示模式   : {'全屏' if fullscreen else '窗口'}")
-    print(f"  运行模式   : {'调试' if debug else '正常'}")
+    print(f"  运行模式   : {_mode_label}")
     print(f"{C['bold']}══════════════════{C['reset']}")
     _ask(f"\n{C['yellow']}按 Enter 启动...{C['reset']}", "")
 
@@ -87,6 +88,7 @@ def interactive_setup() -> dict:
         "debug": debug,
         "fullscreen": fullscreen,
         "show_cursor": show_cursor,
+        "remote_mode": remote_mode,
     }
 
 
@@ -193,6 +195,81 @@ def run_demo(config_path: str):
     demo_run(config_path)
 
 
+def run_remote(config_path: str):
+    """启动遥控模式：HTTP 服务器 + 电机控制，无 GUI/语音/LLM。"""
+    import socket
+    import yaml
+
+    from hardware.motor import create_motor
+    from remote.qrcode_util import display_qr, get_local_ip
+    from remote.server import create_server
+
+    # 只加载电机配置段（不需要 ASR/TTS/LLM 等）
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    motor = create_motor(cfg.get("motor", {}))
+    logger.info("遥控模式 —— 电机控制器: %s", type(motor).__name__)
+
+    # 端口配置
+    port = cfg.get("remote", {}).get("port", 8080)
+    host = "0.0.0.0"
+
+    # 获取局域网 IP
+    local_ip = get_local_ip()
+    url = f"http://{local_ip}:{port}"
+
+    # 显示二维码
+    display_qr(url)
+
+    # 启动 HTTP 服务器
+    server = create_server(host, port, motor)
+    server_thread = threading.Thread(
+        target=server.serve_forever,
+        name="http-server",
+        daemon=True,
+    )
+    server_thread.start()
+    logger.info("HTTP 服务器已启动: %s", url)
+
+    # ── 信号处理 ──
+    shutdown_flag = threading.Event()
+
+    def _signal_handler(signum, frame):
+        logger.info("收到信号 %s，正在关闭...", signum)
+        shutdown_flag.set()
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
+    # ── 主循环：等待 'q' 或信号 ──
+    try:
+        while not shutdown_flag.is_set():
+            try:
+                cmd = input()
+            except EOFError:
+                # stdin 关闭（如被重定向），等待信号
+                shutdown_flag.wait()
+                break
+            if cmd.strip().lower() == "q":
+                logger.info("收到 'q' 命令，正在关闭...")
+                break
+            elif cmd.strip().lower() == "h":
+                print("  q — 退出遥控模式")
+                print("  h — 显示帮助")
+    except KeyboardInterrupt:
+        logger.info("收到中断信号")
+
+    # ── 清理 ──
+    logger.info("正在停止遥控模式...")
+    server.shutdown()
+    from remote.server import RemoteControlHandler
+    RemoteControlHandler.cleanup()
+    motor.cleanup()
+    logger.info("遥控模式已退出。")
+    sys.exit(0)
+
+
 # ------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description="BJEA 校园导览机器人")
@@ -227,6 +304,11 @@ def main():
         action="store_true",
         help="（配合 --quick）禁用 CLI。",
     )
+    parser.add_argument(
+        "--remote",
+        action="store_true",
+        help="（配合 --quick）直接进入遥控模式。",
+    )
 
     args = parser.parse_args()
 
@@ -242,11 +324,12 @@ def main():
     # 普通模式：交互式配置
     if args.quick:
         setup = {
-            "enable_gui": not args.no_gui,
-            "enable_cli": not args.no_cli,
+            "enable_gui": not args.no_gui and not args.remote,
+            "enable_cli": not args.no_cli and not args.remote,
             "debug": args.log_level == "DEBUG",
             "fullscreen": True,
             "show_cursor": False,
+            "remote_mode": args.remote,
         }
     else:
         setup = interactive_setup()
@@ -256,6 +339,11 @@ def main():
         level=getattr(logging, log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    # 遥控模式分支
+    if setup.get("remote_mode"):
+        run_remote(args.config)
+        return
 
     run_navigation(
         args.config,
