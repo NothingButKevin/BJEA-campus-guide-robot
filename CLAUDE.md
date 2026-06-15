@@ -69,7 +69,7 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
      ┌─────────┼──────────┬──────────────┐
      ▼         ▼          ▼              ▼
   speech/   matching/  navigation/   hardware/
-  ├─recognizer  ├─keyword_matcher  ├─navigator  ├─motor (抽象接口+gpiozero+Mock)
+  ├─recognizer  ├─keyword_matcher  ├─navigator  ├─motor (抽象接口+lgpio+Mock)
   └─synthesizer └─(RapidFuzz+拼音)  └─(定距/定角) ├─sensors (MPU6050+编码器)
                               │                   └─audio_player
                          llm/fallback
@@ -88,7 +88,7 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
 | `speech/synthesizer.py` | Edge-TTS 微软免费中文 TTS（subprocess 调 CLI）|
 | `matching/keyword_matcher.py` | 拼音归一化 + RapidFuzz 模糊匹配，支持多意图集，返回置信度 |
 | `llm/fallback.py` | Qwen2.5-0.5B GGUF，llama-cpp-python 推理，`release()`/`reload()` 支持动态生命周期 |
-| `hardware/motor.py` | `MotorController` 抽象接口 + `RPiMotorController`（PWM）+ `MockMotorController`（日志），工厂自动选 |
+| `hardware/motor.py` | `MotorController` 抽象接口 + `RPiMotorController`（lgpio 直驱 50Hz PWM）+ `MockMotorController`（日志），工厂自动选，需 `sudo` |
 | `hardware/sensors.py` | MPU6050 航向 + 编码器里程计，桌面端返回零值自动降级 |
 | `hardware/audio_player.py` | TTS 合成播报，greeting / confirm / arrived 语音流程 |
 | `navigation/navigator.py` | `go_straight(距离)` `turn(角度)` 闭环运动原语 + `follow_route()` 路径执行 |
@@ -116,10 +116,45 @@ main.py ──▶ robot.py（状态机 + 模型生命周期管理）
 
 - 必须连接 GND（物理脚 9 或 14）到驱动板 GND，否则信号无参考电压
 - 驱动板需电池供电，GPIO 信号仅提供控制逻辑
-- Pi 5 需 `GPIOZERO_PIN_FACTORY=lgpio`（`motor.py` 构造函数自动设置）
+- Pi 5 使用 `lgpio` 库直驱，见下方「GPIO 技术选型」。
+
+## GPIO 技术选型
+
+本项目**不使用 gpiozero**。选择 lgpio 直驱的原因是经完整工程排查得出的。
+
+### 排查过程
+
+1. **现象**：gpiozero `Servo` 类输出后左轮反转、右轮不动，多次复现。
+
+2. **排除电池**：电池重新上电后 lgpio 直调工作正常，排除供电问题。
+
+3. **排除 Pi 5 兼容性**：确认 `GPIOZERO_PIN_FACTORY=lgpio` 生效，`Device.pin_factory` 确认为 `LGPIOFactory`。
+
+4. **定位根因**：阅读 `/usr/lib/python3/dist-packages/gpiozero/pins/lgpio.py` 源码第 162 行：
+
+   ```python
+   self._pwm = (freq, int(value * 100))
+   ```
+
+   `int()` 截断了占空比的小数部分。50Hz 舵机中位 7.5% → `int(7.5)` = 7.0%（信号偏移 0.5%），导致中立位变为倒车信号。**只有整数值占空比（5%、8%、10% 等）不受影响**，但舵机中位必须是 7.5%，无法绕过。
+
+5. **交叉验证**：lgpio.tx_pwm 接受 float 占空比，直接传入 7.5 / 10.0 / 5.0 完全正常，双轮前后左右全部正确。
+
+### 结论
+
+gpiozero 的 lgpio 后端封装层存在 `int()` 截断 bug（截至 2026-06-04 未修复），导致 50Hz 舵机信号无法精确输出非整数占空比。项目直接用 lgpio，经实车验证稳定可靠。
+
+### lgpio 使用要点
+
+- 导入：`import lgpio`
+- 打开芯片：`h = lgpio.gpiochip_open(0)`（Pi 5 40pin 排针走 chip 0）
+- 占板输出：`lgpio.gpio_claim_output(h, pin)`
+- 发送 PWM：`lgpio.tx_pwm(h, pin, freq_hz, duty_pct)` — duty 为 float，0–100
+- 释放：`lgpio.gpiochip_close(h)`
+- 需要 root 权限
 
 ## 平台注意事项
 
-- `gpiozero` 在树莓派上自动选择正确后端（Pi 5 用 lgpio），桌面端自动降级为 Mock 实现。注意必须设 `GPIOZERO_PIN_FACTORY=lgpio`，该操作已在 `motor.py` 构造函数中自动完成。
+- `lgpio` 是项目唯一的 GPIO 底层库。桌面端（Mac）因无 `/dev/gpiochip*` 设备，`create_motor()` 工厂函数自动降级为 `MockMotorController`。程序需 `sudo` 运行才能访问 GPIO 硬件。
 - 所有语音输入输出为中文（普通话）
 - 关键词匹配使用拼音归一化处理口音和识别误差

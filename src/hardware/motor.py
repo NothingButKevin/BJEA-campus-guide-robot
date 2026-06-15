@@ -115,8 +115,6 @@ class RPiMotorController(MotorController):
 
     def cleanup(self):
         """释放 GPIO 资源。"""
-        import lgpio
-
         self._lgpio.tx_pwm(self._chip, self._drive_pin, 0, 0)
         self._lgpio.tx_pwm(self._chip, self._steer_pin, 0, 0)
         self._lgpio.gpio_free(self._chip, self._drive_pin)
