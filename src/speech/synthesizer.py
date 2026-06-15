@@ -75,10 +75,35 @@ class SpeechSynthesizer:
 
         try:
             data, sr = sf.read(str(out_path))
-            sd.play(data, sr)
-            sd.wait()
+            self._play(data, sr)
         except Exception as e:
             logger.error("TTS 音频播放失败: %s", e)
+
+    def _play(self, data, sr: int):
+        """播放音频，必要时重采样到设备支持的采样率。"""
+        import numpy as np
+
+        try:
+            sd.play(data, sr)
+            sd.wait()
+            return
+        except sd.PortAudioError as e:
+            if "Invalid sample rate" not in str(e):
+                raise
+
+        # 边缘设备（如 Pi USB 声卡）可能不支持低采样率，尝试重采样
+        target_sr = int(sd.query_devices(kind="output")["default_samplerate"]) or 44100
+        logger.debug("采样率 %d → %d Hz 重采样", sr, target_sr)
+        duration = len(data) / sr
+        try:
+            from scipy.signal import resample
+            data = resample(data, int(duration * target_sr)).astype(np.float32)
+        except ImportError:
+            indices = np.linspace(0, len(data) - 1, int(duration * target_sr))
+            data = np.interp(indices, np.arange(len(data)), data.astype(np.float64)).astype(np.float32)
+
+        sd.play(data, target_sr)
+        sd.wait()
 
     def release(self):
         """释放资源（Edge-TTS 无本地模型，无需释放）。"""
