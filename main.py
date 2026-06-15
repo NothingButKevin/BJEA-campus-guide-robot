@@ -211,6 +211,11 @@ def run_remote(config_path: str):
     motor = create_motor(cfg.get("motor", {}))
     logger.info("遥控模式 —— 电机控制器: %s", type(motor).__name__)
 
+    # 显式确保电机处于停止 / 直行状态
+    motor.stop()
+    motor.center_steering()
+    logger.info("电机已初始化为中立位")
+
     # 端口配置
     port = cfg.get("remote", {}).get("port", 8080)
     host = "0.0.0.0"
