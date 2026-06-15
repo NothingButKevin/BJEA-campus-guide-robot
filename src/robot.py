@@ -6,6 +6,8 @@
 
 import logging
 import queue
+import threading
+import time
 from enum import Enum, auto
 
 import yaml
@@ -74,6 +76,7 @@ class Robot:
         # --- 线程安全通道 ----------------------------------------------
         self.cmd_queue: queue.Queue[str] = queue.Queue()  # CLI → robot 命令队列
         self._state_listeners: list = []                   # 状态变更回调
+        self._shutdown_event = threading.Event()          # 跨线程关机信号
 
         # --- GUI 共享数据（原子读取）-----------------------------------
         self._current_speech: str = ""       # 当前 TTS 播报文字（GUI 字幕）
@@ -241,9 +244,10 @@ class Robot:
                 stop_check=_should_stop,
             )
         else:
-            import time
-            time.sleep(0.5)
-            woke = True
+            if not self._shutdown_event.is_set():
+                logger.info("无摄像头，待机中（按 w 唤醒）")
+                time.sleep(5)
+            return
 
         self._face_progress = 0.0
         if woke:
@@ -260,7 +264,8 @@ class Robot:
         self._last_user_input = self.recognizer.recognize()
         self._last_recognized_text = self._last_user_input
         if not self._last_user_input.strip():
-            logger.warning("未识别到语音，返回待机。")
+            logger.warning("未识别到语音，5 秒后返回待机。")
+            time.sleep(5)
             self.set_state(State.STANDBY)
             return
         self.set_state(State.MATCHING)

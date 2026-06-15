@@ -73,9 +73,12 @@ class SpeechSynthesizer:
             logger.error("Edge-TTS 合成超时")
             return
 
-        data, sr = sf.read(str(out_path))
-        sd.play(data, sr)
-        sd.wait()
+        try:
+            data, sr = sf.read(str(out_path))
+            sd.play(data, sr)
+            sd.wait()
+        except Exception as e:
+            logger.error("TTS 音频播放失败: %s", e)
 
     def release(self):
         """释放资源（Edge-TTS 无本地模型，无需释放）。"""
