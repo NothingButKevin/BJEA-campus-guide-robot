@@ -51,11 +51,14 @@ def interactive_setup() -> dict:
     print(f"{C['bold']}BJEA 校园导览机器人 — 启动配置{C['reset']}")
     print("-" * 40)
 
-    # Q1: 显示模式
+    # Q1: 显示模式（树莓派默认全屏，其他平台默认窗口）
+    _pi_model = Path("/proc/device-tree/model")
+    _is_pi = _pi_model.exists() and "raspberry pi" in _pi_model.read_text().lower()
+    _default_display = "2" if _is_pi else "1"
     print(f"\n{C['cyan']}1. 显示模式？{C['reset']}")
     print("   [1] 窗口模式")
     print("   [2] 全屏模式")
-    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2"})
+    ans = _ask(f"  选择 {C['yellow']}[{_default_display}]{C['reset']}: ", _default_display, {"1", "2"})
     fullscreen = ans == "2"
     show_cursor = not fullscreen
 
