@@ -41,15 +41,9 @@ def _ask(prompt: str, default: str = "", valid: set = None) -> str:
 
 def _can_show_gui() -> bool:
     """检测是否有图形显示器可用（不创建 Tk 实例，避免干扰后续 GUI）。"""
-    # macOS/Linux 有 DISPLAY 环境变量或是在原生桌面环境
     if sys.platform == "darwin":
         return True  # Mac 始终有显示器
-    if os.environ.get("DISPLAY"):
-        return True
-    if os.environ.get("WAYLAND_DISPLAY"):
-        return True
-    # Pi 上检查 /dev/fb0
-    if os.path.exists("/dev/fb0"):
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
         return True
     return False
 
