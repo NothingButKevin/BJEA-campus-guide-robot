@@ -99,9 +99,13 @@ class RemoteControlHandler(BaseHTTPRequestHandler):
             return
 
         # ── 动作分发 ──
+        # 注意：forward/backward 为纯直线运动，必须先回中转向，
+        # 否则上一次转向的舵机信号会残留在 GPIO17 上导致跑偏。
         if action == "forward":
+            motor.center_steering()
             motor.forward(_MOVE_SPEED)
         elif action == "backward":
+            motor.center_steering()
             motor.backward(_MOVE_SPEED)
         elif action == "left":
             motor.steer(-_STEER_ANGLE)
