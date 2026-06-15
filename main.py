@@ -147,13 +147,9 @@ def run_navigation(config_path: str, enable_gui: bool = True, enable_cli: bool =
         cli.start()
         logger.info("CLI 控制台已启动")
 
-    # --- 检查 GUI 可用性 ---
+    # --- 启动 GUI ---
     if enable_gui:
-        if not _can_show_gui():
-            logger.warning("无可用显示器，GUI 已禁用")
-            enable_gui = False
-        else:
-            gui = RobotFace(cfg)
+        gui = RobotFace(cfg)
 
     # --- 启动 Robot ---
     robot_thread = threading.Thread(
