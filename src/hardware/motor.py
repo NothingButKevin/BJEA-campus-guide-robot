@@ -66,12 +66,6 @@ class RPiMotorController(MotorController):
     """
 
     def __init__(self, config: dict):
-        import os
-
-        # Pi 5（RP1 芯片）需要 lgpio 后端，否则 PWM 无输出
-        if "GPIOZERO_PIN_FACTORY" not in os.environ:
-            os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"
-
         from gpiozero import Servo
 
         self._throttle = Servo(config["drive_pin"])   # GPIO27 → 油门
@@ -145,7 +139,13 @@ class MockMotorController(MotorController):
 # ------------------------------------------------------------------
 
 def create_motor(config: dict) -> MotorController:
-    """根据当前平台自动选择电机控制器实现。"""
+    """根据当前平台自动选择电机控制器实现。
+
+    Pi 5 必须使用 lgpio 后端——环境变量必须在 gpiozero 首次导入前设置。
+    """
+    import os
+    os.environ.setdefault("GPIOZERO_PIN_FACTORY", "lgpio")
+
     try:
         from gpiozero import Servo  # noqa: F401
 
