@@ -70,18 +70,19 @@ class RPiMotorController(MotorController):
     _MAX_REV = 5.0   # 全速后退 / 左满舵
 
     def __init__(self, config: dict):
-        import lgpio
+        import lgpio as _lgpio
+        self._lgpio = _lgpio
 
-        self._chip = lgpio.gpiochip_open(0)
+        self._chip = _lgpio.gpiochip_open(0)
         self._drive_pin = config["drive_pin"]
         self._steer_pin = config["steer_pin"]
 
-        lgpio.gpio_claim_output(self._chip, self._drive_pin)
-        lgpio.gpio_claim_output(self._chip, self._steer_pin)
+        _lgpio.gpio_claim_output(self._chip, self._drive_pin)
+        _lgpio.gpio_claim_output(self._chip, self._steer_pin)
 
         # 初始化为中位信号（7.5% 占空比）
-        lgpio.tx_pwm(self._chip, self._drive_pin, 50, self._NEUTRAL)
-        lgpio.tx_pwm(self._chip, self._steer_pin, 50, self._NEUTRAL)
+        self._lgpio.tx_pwm(self._chip, self._drive_pin, 50, self._NEUTRAL)
+        self._lgpio.tx_pwm(self._chip, self._steer_pin, 50, self._NEUTRAL)
 
         logger.info(
             "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d）",
@@ -92,35 +93,35 @@ class RPiMotorController(MotorController):
     def forward(self, speed: float = 0.3):
         """前进，*speed* 0.0–1.0。"""
         duty = self._NEUTRAL + speed * (self._MAX_FWD - self._NEUTRAL)
-        lgpio.tx_pwm(self._chip, self._drive_pin, 50, duty)
+        self._lgpio.tx_pwm(self._chip, self._drive_pin, 50, duty)
 
     def backward(self, speed: float = 0.3):
         """后退，*speed* 0.0–1.0。"""
         duty = self._NEUTRAL - speed * (self._NEUTRAL - self._MAX_REV)
-        lgpio.tx_pwm(self._chip, self._drive_pin, 50, duty)
+        self._lgpio.tx_pwm(self._chip, self._drive_pin, 50, duty)
 
     def stop(self):
         """油门回中（7.5% = 停止）。"""
-        lgpio.tx_pwm(self._chip, self._drive_pin, 50, self._NEUTRAL)
+        self._lgpio.tx_pwm(self._chip, self._drive_pin, 50, self._NEUTRAL)
 
     def steer(self, value: float):
         """转向：-1.0（左转） … 1.0（右转）。"""
         duty = self._NEUTRAL + value * (self._MAX_FWD - self._NEUTRAL)
-        lgpio.tx_pwm(self._chip, self._steer_pin, 50, duty)
+        self._lgpio.tx_pwm(self._chip, self._steer_pin, 50, duty)
 
     def center_steering(self):
         """转向回中。"""
-        lgpio.tx_pwm(self._chip, self._steer_pin, 50, self._NEUTRAL)
+        self._lgpio.tx_pwm(self._chip, self._steer_pin, 50, self._NEUTRAL)
 
     def cleanup(self):
         """释放 GPIO 资源。"""
         import lgpio
 
-        lgpio.tx_pwm(self._chip, self._drive_pin, 0, 0)
-        lgpio.tx_pwm(self._chip, self._steer_pin, 0, 0)
-        lgpio.gpio_free(self._chip, self._drive_pin)
-        lgpio.gpio_free(self._chip, self._steer_pin)
-        lgpio.gpiochip_close(self._chip)
+        self._lgpio.tx_pwm(self._chip, self._drive_pin, 0, 0)
+        self._lgpio.tx_pwm(self._chip, self._steer_pin, 0, 0)
+        self._lgpio.gpio_free(self._chip, self._drive_pin)
+        self._lgpio.gpio_free(self._chip, self._steer_pin)
+        self._lgpio.gpiochip_close(self._chip)
 
 
 # ------------------------------------------------------------------
