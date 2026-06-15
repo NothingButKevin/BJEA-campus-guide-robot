@@ -43,7 +43,7 @@ class MotorController(ABC):
 # ------------------------------------------------------------------
 
 class RPiMotorController(MotorController):
-    """PWM 控制的车用底盘，使用 gpiozero + lgpio 后端。
+    """PWM 控制的车用底盘，使用 gpiozero PWMOutputDevice + lgpio 后端。
 
     硬件接线（差分混控驱动板）：:
 
@@ -54,52 +54,60 @@ class RPiMotorController(MotorController):
 
     驱动板内置混控，最终输出为::
 
-        左轮 = 油门 + 转向
-        右轮 = 油门 - 转向
+        左轮 = 油门 + 转向 − 7.5%
+        右轮 = 油门 − 转向 + 7.5%
 
-    占空比范围：5%（全速后退/左转）… 7.5%（中立）… 10%（全速前进/右转）。
+    占空比直接设：5%（全速后退/左转）… 7.5%（中立）… 10%（全速前进/右转）。
+    绕过 gpiozero Servo（其 value=-1…1 映射在 Pi 5 lgpio 下不能保证 7.5% 中立），
+    改用 PWMOutputDevice 直接设 0.0–1.0 占空比。
 
     .. 注意::
 
-        Pi 5 必须设置 ``GPIOZERO_PIN_FACTORY=lgpio``（构造函数自动处理），
+        Pi 5 必须设置 ``GPIOZERO_PIN_FACTORY=lgpio``（工厂函数自动设置），
         否则 gpiozero 回退到 RPi.GPIO 软件 PWM，在 RP1 芯片上不工作。
     """
 
+    _NEUTRAL = 0.075   #  7.5% 中立（停止 / 直行）
+    _MAX_FWD = 0.100   # 10.0% 全速前进 / 右满舵
+    _MAX_REV = 0.050   #  5.0% 全速后退 / 左满舵
+    _SPAN    = _MAX_FWD - _NEUTRAL  # 0.025
+
     def __init__(self, config: dict):
-        from gpiozero import Servo
+        from gpiozero import PWMOutputDevice
 
-        self._throttle = Servo(config["drive_pin"])   # GPIO27 → 油门
-        self._steering = Servo(config["steer_pin"])   # GPIO17 → 转向
-
-        # 初始化为中位信号（value=0 对应 1.5ms / 7.5% 脉冲）
-        self._throttle.value = 0
-        self._steering.value = 0
+        # 关键：initial_value=0.075 避免创建瞬间输出 0% 占空比毛刺
+        self._throttle = PWMOutputDevice(
+            config["drive_pin"], frequency=50, initial_value=self._NEUTRAL,
+        )
+        self._steering = PWMOutputDevice(
+            config["steer_pin"], frequency=50, initial_value=self._NEUTRAL,
+        )
 
         logger.info(
-            "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d）",
-            config["drive_pin"],
-            config["steer_pin"],
+            "RPi 电机控制器就绪（油门=GPIO%d 转向=GPIO%d, %.1f%%–%.1f%%–%.1f%%）",
+            config["drive_pin"], config["steer_pin"],
+            self._MAX_REV * 100, self._NEUTRAL * 100, self._MAX_FWD * 100,
         )
 
     def forward(self, speed: float = 0.3):
-        """前进，*speed* 0.0–1.0。"""
-        self._throttle.value = speed * 0.2
+        """前进，*speed* 0.0–1.0 → 占空比 7.5%–10%。"""
+        self._throttle.value = self._NEUTRAL + speed * self._SPAN
 
     def backward(self, speed: float = 0.3):
-        """后退，*speed* 0.0–1.0。"""
-        self._throttle.value = -speed * 0.2
+        """后退，*speed* 0.0–1.0 → 占空比 7.5%–5%。"""
+        self._throttle.value = self._NEUTRAL - speed * self._SPAN
 
     def stop(self):
-        """油门回中（1.5ms 脉冲 = 停止）。"""
-        self._throttle.value = 0
+        """油门回中（7.5% 占空比 = 停止）。"""
+        self._throttle.value = self._NEUTRAL
 
     def steer(self, value: float):
-        """转向：-1.0（左转） … 1.0（右转），中位 = 1.5ms 脉冲。"""
-        self._steering.value = value * 0.2
+        """转向：-1.0（左转）… 1.0（右转）→ 占空比 5%–10%。"""
+        self._steering.value = self._NEUTRAL + value * self._SPAN
 
     def center_steering(self):
-        """转向回中。"""
-        self._steering.value = 0
+        """转向回中（7.5% 占空比）。"""
+        self._steering.value = self._NEUTRAL
 
     def cleanup(self):
         """释放 PWM 资源。"""
@@ -147,7 +155,7 @@ def create_motor(config: dict) -> MotorController:
     os.environ.setdefault("GPIOZERO_PIN_FACTORY", "lgpio")
 
     try:
-        from gpiozero import Servo  # noqa: F401
+        from gpiozero import PWMOutputDevice  # noqa: F401
 
         return RPiMotorController(config)
     except ImportError:
