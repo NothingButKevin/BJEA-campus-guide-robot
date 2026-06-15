@@ -259,6 +259,10 @@ class Robot:
     def _run_listening(self):
         self._last_user_input = self.recognizer.recognize()
         self._last_recognized_text = self._last_user_input
+        if not self._last_user_input.strip():
+            logger.warning("未识别到语音，返回待机。")
+            self.set_state(State.STANDBY)
+            return
         self.set_state(State.MATCHING)
 
     def _run_matching(self):

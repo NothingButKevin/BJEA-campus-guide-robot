@@ -50,7 +50,7 @@ class FaceDetector:
 
             logger.info("人脸检测器就绪（camera=%d）", self._camera_id)
             return True
-        except ImportError:
+        except Exception:
             logger.warning("OpenCV 不可用，人脸检测已禁用。使用 CLI 'w' 手动唤醒。")
             return False
         except Exception as e:

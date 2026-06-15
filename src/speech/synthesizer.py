@@ -1,6 +1,7 @@
 """中文语音合成模块 —— 使用微软 Edge TTS 免费接口。"""
 
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,23 @@ import soundfile as sf
 logger = logging.getLogger(__name__)
 
 _CACHE_DIR = Path("cache")
+
+# 查找 edge-tts CLI（piwheels 装到 ~/.local/bin，可能不在 PATH 里）
+_EDGE_TTS_BIN = shutil.which("edge-tts")
+if _EDGE_TTS_BIN is None:
+    # fallback: 检查常见的用户安装路径
+    _candidates = [
+        Path.home() / ".local/bin/edge-tts",
+    ]
+    for _c in _candidates:
+        if _c.exists():
+            _EDGE_TTS_BIN = str(_c)
+            break
+
+if _EDGE_TTS_BIN:
+    logger.debug("edge-tts 路径: %s", _EDGE_TTS_BIN)
+else:
+    logger.warning("edge-tts 未找到，TTS 将不可用")
 
 
 class SpeechSynthesizer:
@@ -27,12 +45,16 @@ class SpeechSynthesizer:
 
     def speak(self, text: str):
         """将文本合成语音并通过默认输出设备播放。"""
+        if _EDGE_TTS_BIN is None:
+            logger.error("edge-tts 未安装，请执行: pip install edge-tts")
+            return
+
         out_path = _CACHE_DIR / "tts_out.mp3"
 
         try:
             subprocess.run(
                 [
-                    "edge-tts",
+                    _EDGE_TTS_BIN,
                     "--text", text,
                     "--voice", self._voice,
                     "--write-media", str(out_path),

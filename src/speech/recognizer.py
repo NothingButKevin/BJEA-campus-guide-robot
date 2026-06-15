@@ -101,7 +101,11 @@ class SpeechRecognizer:
 
     def recognize(self) -> str:
         """录音并返回转写的中文文本。"""
-        self._record_until_silence()
+        try:
+            self._record_until_silence()
+        except Exception as e:
+            logger.error("录音失败（可能无麦克风）: %s", e)
+            return ""
         result = self._model.generate(
             input=self.output_path,
             language="zh",
