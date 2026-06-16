@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # ── 常量 ──
 _MOVE_SPEED = 0.3       # 直行速度
-_STEER_ANGLE = 0.5      # 转弯舵量
+_STEER_ANGLE = 0.2      # 转弯舵量
 _CMD_TIMEOUT = 2.0      # 看门狗超时（秒），超时自动停止
 
 # ── HTML 模板路径 ──
