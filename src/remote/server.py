@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 # ── 常量 ──
 _MOVE_SPEED = 0.3       # 直行速度
-_STEER_ANGLE = 0.2      # 转弯舵量
+_STEER_LEFT  = 0.2      # 左转舵量
+_STEER_RIGHT = 0.2      # 右转舵量（可独立调校不对称电机）
 _CMD_TIMEOUT = 2.0      # 看门狗超时（秒），超时自动停止
 
 # ── HTML 模板路径 ──
@@ -109,10 +110,10 @@ class RemoteControlHandler(BaseHTTPRequestHandler):
             motor.backward(_MOVE_SPEED)
         elif action == "left":
             motor.stop()            # 油门回中
-            motor.steer(-_STEER_ANGLE)
+            motor.steer(-_STEER_LEFT)
         elif action == "right":
             motor.stop()            # 油门回中
-            motor.steer(_STEER_ANGLE)
+            motor.steer(_STEER_RIGHT)
         elif action == "stop":
             motor.stop()
             motor.center_steering()
