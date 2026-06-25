@@ -54,6 +54,61 @@ remote:
   port: 8080                        # HTTP 服务器端口
 
 # ------------------------------------------------------------------
+# LD06 激光雷达配置
+# ------------------------------------------------------------------
+lidar:
+  port: "/dev/ttyUSB0"              # LD06 USB 转串口设备
+  baudrate: 230400                  # LD06 默认波特率
+  inverted: false                   # 建图默认使用 LD06 原始角度；270° 固定为车头
+  angle_offset_deg: 0.0             # 实车校准用角度偏移
+
+# ------------------------------------------------------------------
+# 地图录入模式配置
+# ------------------------------------------------------------------
+mapping:
+  maps_dir: "maps"                  # 每张地图保存为 maps/<name>.json
+  angle_min: 0.0                    # 使用 360° 雷达数据
+  angle_max: 360.0
+  min_distance_m: 0.08              # 雷达硬件最小有效距离
+  robot_body_radius_m: 0.60         # 删除半径 0.6m 内近场脏点
+  max_distance_m: 10.0              # 删除 10m 外远场点
+  horizontal_flip: true             # 雷达倒立安装，水平翻转左右方向；270° 仍为车头
+  grid_resolution_m: 0.05           # 地图点云栅格去重分辨率
+  snapshot_duration_s: 1.0          # 5 圈快照总采集时长
+  snapshot_revolutions: 5           # 连续采 5 轮快照
+  snapshot_min_scan_timeout_s: 0.25 # 每轮最短读取时间，避免首帧漏角度桶
+  snapshot_min_consensus_ratio: 0.60 # 至少 3/5 轮稳定出现才进入快照
+  snapshot_bucket_deg: 1.0          # 快照角度桶，中值滤波
+  snapshot_consensus_angle_window_deg: 1.0  # 跨圈匹配允许邻近角度桶
+  snapshot_distance_tolerance_m: 0.30       # 跨圈距离一致性绝对容差
+  snapshot_distance_tolerance_ratio: 0.12   # 跨圈距离一致性相对容差
+  coarse_search_xy_m: 1.0           # 快照粗匹配平移搜索半径
+  coarse_search_xy_step_m: 0.10     # 快照粗匹配平移步长
+  coarse_search_yaw_deg: 45.0       # 快照粗匹配角度搜索半径
+  coarse_search_yaw_step_deg: 5.0   # 快照粗匹配角度步长
+  icp_iterations: 12                # ICP 精配准迭代次数
+  icp_inlier_distance_m: 0.18       # ICP 内点距离阈值
+  max_icp_yaw_correction_deg: 20.0  # 兼容旧参数；全局匹配主路径不依赖该先验
+  global_yaw_step_deg: 10.0         # 全局旋转投票步长
+  local_refine_yaw_deg: 6.0         # ICP 后围绕候选继续细扫角度
+  local_refine_yaw_step_deg: 1.0    # 局部角度细扫步长
+  local_refine_xy_m: 0.10           # ICP 后围绕候选继续细扫平移
+  local_refine_xy_step_m: 0.05      # 局部平移细扫步长
+  vote_resolution_m: 0.20           # 全局平移投票栅格
+  vote_top_per_yaw: 3               # 每个角度保留的平移候选数
+  candidate_top_k: 8                # 进入 Trimmed ICP 的候选数量
+  trim_fraction: 0.40               # ICP 只用距离最小的一部分重叠点
+  match_density_resolution_m: 0.15  # 匹配前按空间网格均匀化，避免近墙高密点支配评分
+  min_inlier_short_axis_m: 0.25     # 内点短轴覆盖不足则视为单墙/线性退化匹配
+  min_inlier_axis_ratio: 0.08       # 内点主次轴比例过低则拒绝自动融合
+  ambiguity_score_gap: 0.15         # 第一/第二候选分差低于该比例判为歧义
+  min_overlap_ratio: 0.25           # 接受匹配的最小重合率
+  max_mean_error_m: 0.16            # 接受匹配的最大平均误差
+  min_snapshot_points: 40           # 快照最小有效点数
+  max_points: 80000                 # 地图最多保留点数
+  autosave_interval_s: 5.0          # 自动保存间隔
+
+# ------------------------------------------------------------------
 # UI 配置 —— GUI 脸部 + CLI 控制台
 # ------------------------------------------------------------------
 ui:

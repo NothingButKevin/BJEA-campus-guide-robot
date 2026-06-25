@@ -15,3 +15,5 @@ torch>=2.0.0
 torchaudio>=2.0.0
 xpinyin==0.7.6
 qrcode>=8.0
+pyserial>=3.5
+scipy>=1.11

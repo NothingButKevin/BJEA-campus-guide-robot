@@ -2,4 +2,6 @@
 output.wav
 __pycache__
 *.so
+maps/*.json
+maps/*.json.tmp
 config.local.yamlcache/
