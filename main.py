@@ -315,7 +315,7 @@ def _select_mapping_map(storage):
 
 
 def _select_navigation_map(config_path: str):
-    """正常运行前选择已有地图；无地图时允许继续启动。"""
+    """正常运行前选择已有地图；无地图或取消时退出程序。"""
     import yaml
 
     from mapping.storage import MapStorage
@@ -329,20 +329,21 @@ def _select_navigation_map(config_path: str):
     print("请选择要载入的地图")
     print("-" * 40)
     if not maps:
-        print("当前没有已有地图，将不载入地图继续启动。")
-        return None
+        print("当前没有已有地图。请先进入地图录入模式创建地图。")
+        raise SystemExit(1)
 
     for i, name in enumerate(maps, start=1):
         print(f"  [{i}] {name}")
     print()
-    print("输入数字选择地图；直接按 Enter 不载入地图。")
+    print("输入数字选择地图；直接按 Enter 退出。")
 
     while True:
         raw = input("地图: ").strip()
         if not raw:
-            return None
+            print("未选择地图，退出。")
+            raise SystemExit(1)
         if not raw.isdigit():
-            print("请输入地图编号，或直接按 Enter 跳过。")
+            print("请输入地图编号，或直接按 Enter 退出。")
             continue
         idx = int(raw)
         if 1 <= idx <= len(maps):
@@ -644,7 +645,6 @@ def main():
         run_mapping(args.config)
         return
 
-    selected_map = None
     if args.map_name:
         from mapping.storage import MapStorage
         import yaml
@@ -652,7 +652,10 @@ def main():
         with open(args.config, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         selected_map = MapStorage(cfg.get("mapping", {}).get("maps_dir", "maps")).load(args.map_name)
-    elif not args.quick:
+    elif args.quick:
+        print("正常运行模式必须载入地图。请使用 --map-name 指定地图，或不要使用 --quick 以交互选择。")
+        raise SystemExit(1)
+    else:
         selected_map = _select_navigation_map(args.config)
 
     run_navigation(
