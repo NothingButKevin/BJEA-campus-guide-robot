@@ -67,15 +67,17 @@ def interactive_setup() -> dict:
     print("   [1] 正常运行")
     print("   [2] 调试运行（详细日志 + 模块诊断）")
     print(f"   {C['green']}[3] 遥控模式{C['reset']}")
-    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2", "3"})
+    print(f"   {C['green']}[4] 地图录入模式{C['reset']}")
+    ans = _ask(f"  选择 {C['yellow']}[1]{C['reset']}: ", "1", {"1", "2", "3", "4"})
     debug = ans == "2"
     remote_mode = ans == "3"
+    map_record_mode = ans == "4"
 
-    enable_gui = not remote_mode
-    enable_cli = not remote_mode
+    enable_gui = not remote_mode and not map_record_mode
+    enable_cli = not remote_mode and not map_record_mode
 
     # ── 摘要 ──
-    _mode_label = "遥控" if remote_mode else ("调试" if debug else "正常")
+    _mode_label = "地图录入" if map_record_mode else ("遥控" if remote_mode else ("调试" if debug else "正常"))
     print(f"\n{C['bold']}══════════════════{C['reset']}")
     print(f"  显示模式   : {'全屏' if fullscreen else '窗口'}")
     print(f"  运行模式   : {_mode_label}")
@@ -89,13 +91,14 @@ def interactive_setup() -> dict:
         "fullscreen": fullscreen,
         "show_cursor": show_cursor,
         "remote_mode": remote_mode,
+        "map_record_mode": map_record_mode,
     }
 
 
 # ------------------------------------------------------------------
 def run_navigation(config_path: str, enable_gui: bool = True, enable_cli: bool = True,
                    fullscreen: bool = True, show_cursor: bool = False,
-                   debug: bool = False):
+                   debug: bool = False, selected_map=None):
     """启动完整的校园导览状态机。"""
     import yaml
 
@@ -112,6 +115,12 @@ def run_navigation(config_path: str, enable_gui: bool = True, enable_cli: bool =
     ui_cfg["cursor_visible"] = show_cursor
 
     robot = Robot(config_path)
+    robot.loaded_map = selected_map
+    if selected_map is not None:
+        robot._cfg.setdefault("mapping", {})["active_map"] = selected_map.name
+        logger.info("已载入地图: %s (%s 点, %s waypoint)", selected_map.name, len(selected_map.points), len(selected_map.waypoints))
+    else:
+        logger.info("未载入地图")
     robot.face_detector._debug = debug  # 调试模式：启用摄像头预览窗口
 
     gui: RobotFace | None = None
@@ -275,6 +284,276 @@ def run_remote(config_path: str):
     sys.exit(0)
 
 
+def _select_mapping_map(storage):
+    """交互式选择或创建地图。"""
+    maps = storage.list_maps()
+    print()
+    print("BJEA 地图录入模式 — 地图选择")
+    print("-" * 40)
+    if maps:
+        for i, name in enumerate(maps, start=1):
+            print(f"  [{i}] {name}")
+        print()
+        print("输入数字选择已有地图；输入新名称创建地图。")
+    else:
+        print("当前没有已有地图。输入地图名称创建新地图。")
+
+    while True:
+        raw = input("地图: ").strip()
+        if not raw:
+            print("地图名称不能为空。")
+            continue
+        if raw.isdigit() and maps:
+            idx = int(raw)
+            if 1 <= idx <= len(maps):
+                return storage.load(maps[idx - 1]), False
+            print("地图编号不存在。")
+            continue
+        if storage.exists(raw):
+            return storage.load(raw), False
+        return storage.create(raw), True
+
+
+def _select_navigation_map(config_path: str):
+    """正常运行前选择已有地图；无地图时允许继续启动。"""
+    import yaml
+
+    from mapping.storage import MapStorage
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    storage = MapStorage(cfg.get("mapping", {}).get("maps_dir", "maps"))
+    maps = storage.list_maps()
+    print()
+    print("请选择要载入的地图")
+    print("-" * 40)
+    if not maps:
+        print("当前没有已有地图，将不载入地图继续启动。")
+        return None
+
+    for i, name in enumerate(maps, start=1):
+        print(f"  [{i}] {name}")
+    print()
+    print("输入数字选择地图；直接按 Enter 不载入地图。")
+
+    while True:
+        raw = input("地图: ").strip()
+        if not raw:
+            return None
+        if not raw.isdigit():
+            print("请输入地图编号，或直接按 Enter 跳过。")
+            continue
+        idx = int(raw)
+        if 1 <= idx <= len(maps):
+            return storage.load(maps[idx - 1])
+        print("地图编号不存在。")
+
+
+def run_mapping(config_path: str):
+    """启动地图录入模式：HTTP 遥控 + LD06 建图 + CLI waypoint。"""
+    import yaml
+
+    from hardware.lidar_ld06 import create_lidar
+    from hardware.motor import create_motor
+    from mapping.map_model import Pose
+    from mapping.mapper import MapperConfig, PointCloudMapper
+    from mapping.storage import MapStorage
+    from remote.qrcode_util import display_qr, get_local_ip
+    from remote.server import RemoteControlHandler, create_server
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    storage = MapStorage(cfg.get("mapping", {}).get("maps_dir", "maps"))
+    point_map, created = _select_mapping_map(storage)
+    point_map.metadata.setdefault("lidar", cfg.get("lidar", {}))
+    point_map.metadata.setdefault("mapping", cfg.get("mapping", {}))
+    logger.info("地图录入模式 —— %s地图: %s", "新建" if created else "加载", point_map.name)
+
+    motor = create_motor(cfg.get("motor", {}))
+    motor.stop()
+    motor.center_steering()
+
+    lidar = create_lidar(cfg.get("lidar", {}))
+
+    mapper = PointCloudMapper(
+        point_map,
+        storage,
+        MapperConfig.from_dict(cfg.get("mapping", {})),
+        lidar=lidar,
+    )
+    port = cfg.get("remote", {}).get("port", 8080)
+    host = "0.0.0.0"
+    local_ip = get_local_ip()
+    base_url = f"http://{local_ip}:{port}"
+    map_url = f"{base_url}/map"
+
+    display_qr(
+        base_url,
+        title="地图录入模式",
+        exit_hint="同一页面遥控、采快照、查看地图；终端输入 h 查看备用命令",
+    )
+    print(f"    地图录入页面: {base_url}")
+    print()
+
+    def _snapshot_api(params: dict) -> dict:
+        pose_data = params.get("initial_pose")
+        initial_pose = None
+        if isinstance(pose_data, dict):
+            initial_pose = Pose.from_dict(pose_data)
+        result = mapper.capture_and_integrate(str(params.get("name", "")), initial_pose)
+        return {"status": "ok", "match": result.as_dict(), "map": mapper.snapshot()}
+
+    def _waypoint_api(params: dict) -> dict:
+        wp = mapper.add_waypoint(str(params.get("name", "")).strip())
+        return {"status": "ok", "waypoint": wp.as_dict(), "map": mapper.snapshot()}
+
+    def _save_api(params: dict) -> dict:
+        path = storage.save(point_map)
+        return {"status": "ok", "path": str(path)}
+
+    def _pose_api(params: dict) -> dict:
+        pose = Pose(
+            float(params.get("x", 0.0)),
+            float(params.get("y", 0.0)),
+            float(params.get("yaw", 0.0)),
+        )
+        mapper.set_pose(pose)
+        return {"status": "ok", "pose": pose.as_dict(), "map": mapper.snapshot()}
+
+    def _accept_candidate_api(params: dict) -> dict:
+        result = mapper.accept_candidate(
+            int(params.get("rank", 1)),
+            str(params.get("name", "")),
+        )
+        return {"status": "ok", "match": result.as_dict(), "map": mapper.snapshot()}
+
+    def _discard_snapshot_api(params: dict) -> dict:
+        return {"status": "ok", "map": mapper.discard_pending_snapshot()}
+
+    server = create_server(
+        host,
+        port,
+        motor,
+        map_snapshot_provider=mapper.snapshot,
+        snapshot_handler=_snapshot_api,
+        waypoint_handler=_waypoint_api,
+        save_handler=_save_api,
+        pose_handler=_pose_api,
+        accept_candidate_handler=_accept_candidate_api,
+        discard_snapshot_handler=_discard_snapshot_api,
+    )
+    server_thread = threading.Thread(target=server.serve_forever, name="mapping-http-server", daemon=True)
+    server_thread.start()
+    logger.info("地图录入 HTTP 服务已启动: %s", base_url)
+
+    shutdown_flag = threading.Event()
+
+    def _signal_handler(signum, frame):
+        logger.info("收到信号 %s，正在关闭地图录入模式...", signum)
+        shutdown_flag.set()
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
+    def _print_help():
+        print("  snap xxx     停稳后采集快照并拼接")
+        print("  new xxx      在当前位置新建/覆盖 waypoint")
+        print("  del xxx      删除 waypoint")
+        print("  pose x y yaw 手动设置当前位置")
+        print("  list         列出 waypoint")
+        print("  save         保存地图")
+        print("  h/help       显示帮助")
+        print("  q/quit/exit  保存并退出")
+
+    print("地图录入命令：")
+    _print_help()
+
+    try:
+        while not shutdown_flag.is_set():
+            try:
+                cmd = input("map> ").strip()
+            except EOFError:
+                shutdown_flag.wait()
+                break
+            if not cmd:
+                continue
+            lower = cmd.lower()
+            if lower in {"q", "quit", "exit"}:
+                break
+            if lower in {"h", "help"}:
+                _print_help()
+                continue
+            if lower == "save":
+                path = storage.save(point_map)
+                print(f"已保存: {path}")
+                continue
+            if lower.startswith("pose "):
+                parts = cmd.split()
+                if len(parts) != 4:
+                    print("用法: pose x y yaw")
+                    continue
+                pose = mapper.set_pose(Pose(float(parts[1]), float(parts[2]), float(parts[3])))
+                print(f"当前位姿: x={pose.x:.2f}, y={pose.y:.2f}, yaw={pose.yaw:.1f}")
+                continue
+            if lower == "list":
+                snapshot = point_map.snapshot()
+                waypoints = snapshot["waypoints"]
+                if not waypoints:
+                    print("当前地图没有 waypoint。")
+                for wp in waypoints:
+                    print(f"  {wp['name']}: x={wp['x']:.2f}, y={wp['y']:.2f}, yaw={wp['yaw']:.1f}")
+                continue
+            if cmd.startswith("snap "):
+                name = cmd[5:].strip()
+                result = mapper.capture_and_integrate(name)
+                storage.save(point_map)
+                print(
+                    f"快照 {name or '-'}: {'成功' if result.accepted else '失败'} "
+                    f"overlap={result.overlap_ratio:.2f} error={result.mean_error_m:.3f} "
+                    f"pose=({result.pose.x:.2f},{result.pose.y:.2f},{result.pose.yaw:.1f})"
+                )
+                continue
+            if cmd.startswith("new "):
+                name = cmd[4:].strip()
+                try:
+                    wp = mapper.add_waypoint(name)
+                    print(f"已创建 waypoint {wp.name}: x={wp.x:.2f}, y={wp.y:.2f}, yaw={wp.yaw:.1f}")
+                except ValueError as exc:
+                    print(str(exc))
+                continue
+            if cmd.startswith("del "):
+                name = cmd[4:].strip()
+                if point_map.delete_waypoint(name):
+                    storage.save(point_map)
+                    print(f"已删除 waypoint: {name}")
+                else:
+                    print(f"未找到 waypoint: {name}")
+                continue
+            print(f"未知命令: {cmd}")
+            _print_help()
+    except KeyboardInterrupt:
+        logger.info("收到中断信号")
+    finally:
+        logger.info("正在停止地图录入模式...")
+        try:
+            storage.save(point_map)
+        except Exception as exc:
+            logger.error("保存地图失败: %s", exc)
+        server.shutdown()
+        RemoteControlHandler.cleanup()
+        try:
+            lidar.close()
+        except Exception:
+            pass
+        motor.stop()
+        motor.center_steering()
+        motor.cleanup()
+        logger.info("地图录入模式已退出。")
+    sys.exit(0)
+
+
 # ------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description="BJEA 校园导览机器人")
@@ -314,6 +593,16 @@ def main():
         action="store_true",
         help="（配合 --quick）直接进入遥控模式。",
     )
+    parser.add_argument(
+        "--map-record",
+        action="store_true",
+        help="（配合 --quick）直接进入地图录入模式。",
+    )
+    parser.add_argument(
+        "--map-name",
+        default="",
+        help="正常运行时直接载入指定地图；未指定时交互式启动会提示选择。",
+    )
 
     args = parser.parse_args()
 
@@ -329,12 +618,13 @@ def main():
     # 普通模式：交互式配置
     if args.quick:
         setup = {
-            "enable_gui": not args.no_gui and not args.remote,
-            "enable_cli": not args.no_cli and not args.remote,
+            "enable_gui": not args.no_gui and not args.remote and not args.map_record,
+            "enable_cli": not args.no_cli and not args.remote and not args.map_record,
             "debug": args.log_level == "DEBUG",
             "fullscreen": True,
             "show_cursor": False,
             "remote_mode": args.remote,
+            "map_record_mode": args.map_record,
         }
     else:
         setup = interactive_setup()
@@ -350,6 +640,21 @@ def main():
         run_remote(args.config)
         return
 
+    if setup.get("map_record_mode"):
+        run_mapping(args.config)
+        return
+
+    selected_map = None
+    if args.map_name:
+        from mapping.storage import MapStorage
+        import yaml
+
+        with open(args.config, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        selected_map = MapStorage(cfg.get("mapping", {}).get("maps_dir", "maps")).load(args.map_name)
+    elif not args.quick:
+        selected_map = _select_navigation_map(args.config)
+
     run_navigation(
         args.config,
         enable_gui=setup["enable_gui"],
@@ -357,6 +662,7 @@ def main():
         fullscreen=setup["fullscreen"],
         show_cursor=setup["show_cursor"],
         debug=setup["debug"],
+        selected_map=selected_map,
     )
 
 

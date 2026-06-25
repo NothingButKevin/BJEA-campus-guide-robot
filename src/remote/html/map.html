@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>BJEA 地图录入</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%; margin: 0; overflow: hidden;
+      background: #111318; color: #e8edf2;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    }
+    #map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    .panel {
+      position: fixed; left: 12px; top: 12px; width: min(360px, calc(100vw - 24px));
+      display: grid; gap: 10px; padding: 10px;
+      background: rgba(17, 19, 24, 0.84);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+      backdrop-filter: blur(8px);
+    }
+    .title { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #60a5fa; }
+    .status { font-size: 12px; line-height: 1.45; color: #b9c3cf; min-height: 34px; }
+    button, input {
+      border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;
+      background: rgba(255,255,255,0.08); color: #e8edf2;
+      min-height: 34px; font: inherit;
+    }
+    button { cursor: pointer; font-weight: 650; }
+    button:active, button.active { background: rgba(96,165,250,0.28); }
+    input { padding: 0 9px; width: 100%; }
+    .danger { background: rgba(239,68,68,0.22); }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+    .pose-row { display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 6px; }
+    .keys {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+      font-size: 12px; color: #b9c3cf;
+    }
+    .key {
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+      padding: 6px; text-align: center; background: rgba(255,255,255,0.05);
+    }
+    .key.active { color: #ffffff; background: rgba(96,165,250,0.28); }
+    .candidates { display: grid; gap: 6px; }
+    .candidate {
+      display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center;
+      font-size: 12px; text-align: left; padding: 6px 8px;
+    }
+    .candidate:hover { background: rgba(45,212,191,0.18); }
+    .legend {
+      position: fixed; right: 12px; top: 12px; font-size: 12px; color: #b9c3cf;
+      padding: 8px 10px; border-radius: 8px; background: rgba(17,19,24,0.75);
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    @media (max-width: 720px) {
+      .panel { bottom: 10px; top: auto; }
+      .legend { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="map"></canvas>
+  <div class="panel">
+    <div class="title"><span class="dot" id="dot"></span><span>BJEA 地图录入</span></div>
+    <div class="status" id="status">连接中</div>
+    <div class="keys">
+      <div class="key" data-key="w">W 前进</div>
+      <div class="key" data-key="a">A 左转</div>
+      <div class="key" data-key="s">S 后退</div>
+      <div class="key" data-key="d">D 右转</div>
+      <div class="key" data-key="space">空格急停</div>
+      <div class="key" data-key="e">E 快照</div>
+      <div class="key">方向键移图</div>
+      <div class="key">滚轮缩放</div>
+    </div>
+    <div class="row">
+      <input id="snapshotName" placeholder="快照名称">
+      <button id="snapBtn">采快照</button>
+    </div>
+    <div class="candidates" id="candidates"></div>
+    <button class="danger" id="discardBtn">丢弃本次快照</button>
+    <div class="row">
+      <input id="waypointName" placeholder="Waypoint 名称">
+      <button id="wpBtn">新建</button>
+    </div>
+    <div class="pose-row">
+      <input id="poseX" placeholder="x">
+      <input id="poseY" placeholder="y">
+      <input id="poseYaw" placeholder="yaw">
+      <button id="poseBtn">设位姿</button>
+    </div>
+    <button id="saveBtn">保存地图</button>
+  </div>
+  <div class="legend">灰: 全局点云　青: 当前快照　蓝: 位姿　黄: Waypoint</div>
+  <script>
+    (function() {
+      var canvas = document.getElementById('map');
+      var ctx = canvas.getContext('2d');
+      var statusEl = document.getElementById('status');
+      var dotEl = document.getElementById('dot');
+      var state = null;
+      var hoverPreview = null;
+      var hoverPose = null;
+      var scale = 90, panX = 0, panY = 0;
+      var activeAction = null, intervalId = null;
+      var pressed = {};
+      var snapshotInFlight = false;
+      var keyToAction = {w: 'forward', a: 'left', s: 'backward', d: 'right'};
+
+      function api(path, body) {
+        return fetch(path, {
+          method: body ? 'POST' : 'GET',
+          cache: 'no-cache',
+          headers: body ? {'Content-Type': 'application/json'} : {},
+          body: body ? JSON.stringify(body) : undefined
+        }).then(function(r) { return r.json(); });
+      }
+      function sendAction(action) { return api('/api/move?action=' + encodeURIComponent(action)); }
+      function setStatus(text, bad) {
+        statusEl.textContent = text;
+        dotEl.style.background = bad ? '#f59e0b' : '#60a5fa';
+      }
+      function startAction(action) {
+        if (action === 'stop') { stopAction(); sendAction('stop'); return; }
+        if (activeAction === action) return;
+        stopAction(); activeAction = action; sendAction(action);
+        intervalId = setInterval(function() { if (activeAction) sendAction(activeAction); }, 200);
+        setKeyActive(action, true);
+      }
+      function stopAction() {
+        if (intervalId) clearInterval(intervalId);
+        intervalId = null;
+        if (activeAction) sendAction('stop');
+        setKeyActive(activeAction, false);
+        activeAction = null;
+      }
+      function setKeyActive(actionOrKey, active) {
+        var map = {forward: 'w', left: 'a', backward: 's', right: 'd', stop: 'space', snapshot: 'e'};
+        var key = map[actionOrKey] || actionOrKey;
+        var el = document.querySelector('[data-key="' + key + '"]');
+        if (el) el.classList.toggle('active', !!active);
+      }
+      function typingTarget(target) {
+        return target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      }
+      function triggerSnapshot() {
+        if (snapshotInFlight) return;
+        snapshotInFlight = true;
+        hoverPreview = null;
+        hoverPose = null;
+        document.getElementById('snapBtn').disabled = true;
+        document.getElementById('discardBtn').disabled = true;
+        setKeyActive('e', true);
+        setStatus('采集中...', false);
+        api('/api/snapshot', {name: document.getElementById('snapshotName').value})
+          .then(function(data) { state = data.map || state; setStatus((data.match && data.match.message) || '快照完成', data.match && !data.match.accepted); draw(); })
+          .catch(function(err) { setStatus('快照失败', true); })
+          .finally(function() {
+            snapshotInFlight = false;
+            document.getElementById('snapBtn').disabled = false;
+            document.getElementById('discardBtn').disabled = false;
+            setKeyActive('e', false);
+          });
+      }
+      window.addEventListener('keydown', function(e) {
+        if (typingTarget(e.target)) return;
+        var key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (key === ' ') {
+          e.preventDefault(); setKeyActive('space', true); startAction('stop'); return;
+        }
+        if (key === 'e') {
+          e.preventDefault(); if (!pressed.e) triggerSnapshot(); pressed.e = true; return;
+        }
+        if (keyToAction[key]) {
+          e.preventDefault(); pressed[key] = true; startAction(keyToAction[key]); return;
+        }
+        if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+          e.preventDefault();
+          var step = 42;
+          if (key === 'ArrowUp') panY += step;
+          if (key === 'ArrowDown') panY -= step;
+          if (key === 'ArrowLeft') panX += step;
+          if (key === 'ArrowRight') panX -= step;
+          draw();
+        }
+      });
+      window.addEventListener('keyup', function(e) {
+        if (typingTarget(e.target)) return;
+        var key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (key === ' ') { e.preventDefault(); setKeyActive('space', false); return; }
+        if (key === 'e') { pressed.e = false; return; }
+        if (keyToAction[key]) {
+          e.preventDefault();
+          pressed[key] = false;
+          if (activeAction === keyToAction[key]) stopAction();
+        }
+      });
+
+      document.getElementById('snapBtn').onclick = function() {
+        triggerSnapshot();
+      };
+      document.getElementById('discardBtn').onclick = function() {
+        discardSnapshot();
+      };
+      document.getElementById('wpBtn').onclick = function() {
+        api('/api/waypoint', {name: document.getElementById('waypointName').value})
+          .then(function(data) { state = data.map || state; setStatus('Waypoint 已创建', false); draw(); })
+          .catch(function() { setStatus('Waypoint 创建失败', true); });
+      };
+      document.getElementById('saveBtn').onclick = function() {
+        api('/api/save', {}).then(function() { setStatus('地图已保存', false); }).catch(function() { setStatus('保存失败', true); });
+      };
+      document.getElementById('poseBtn').onclick = function() {
+        api('/api/pose', {
+          x: Number(document.getElementById('poseX').value || 0),
+          y: Number(document.getElementById('poseY').value || 0),
+          yaw: Number(document.getElementById('poseYaw').value || 0)
+        }).then(function(data) { state = data.map || state; setStatus('位姿已设置', false); draw(); });
+      };
+      function acceptCandidate(rank) {
+        api('/api/accept-candidate', {rank: rank, name: document.getElementById('snapshotName').value})
+          .then(function(data) { state = data.map || state; hoverPreview = null; hoverPose = null; setStatus('候选已确认', false); draw(); })
+          .catch(function() { setStatus('候选确认失败', true); });
+      }
+      function discardSnapshot() {
+        api('/api/discard-snapshot', {})
+          .then(function(data) { state = data.map || state; hoverPreview = null; hoverPose = null; setStatus('本次快照已丢弃', false); draw(); })
+          .catch(function() { setStatus('丢弃失败', true); });
+      }
+
+      function resize() {
+        var dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(window.innerWidth * dpr);
+        canvas.height = Math.floor(window.innerHeight * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        draw();
+      }
+      function worldToScreen(x, y) {
+        return {x: window.innerWidth / 2 + panX - y * scale, y: window.innerHeight / 2 + panY - x * scale};
+      }
+      function drawGrid() {
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        for (var x = (window.innerWidth/2+panX)%scale; x < window.innerWidth; x += scale) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,window.innerHeight); ctx.stroke(); }
+        for (var y = (window.innerHeight/2+panY)%scale; y < window.innerHeight; y += scale) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(window.innerWidth,y); ctx.stroke(); }
+      }
+      function drawPoints(points, color, size) {
+        ctx.fillStyle = color;
+        (points || []).forEach(function(p) {
+          var s = worldToScreen(p.x, p.y);
+          ctx.fillRect(s.x, s.y, size, size);
+        });
+      }
+      function drawPose(pose) {
+        pose = pose || {x:0,y:0,yaw:0};
+        var p = worldToScreen(pose.x || 0, pose.y || 0);
+        var yaw = (pose.yaw || 0) * Math.PI / 180;
+        ctx.fillStyle = '#60a5fa'; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#93c5fd'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x-Math.sin(yaw)*30,p.y-Math.cos(yaw)*30); ctx.stroke();
+      }
+      function drawCandidates(candidates) {
+        var box = document.getElementById('candidates');
+        box.innerHTML = '';
+        var list = (candidates || []).slice(0, 5);
+        list.forEach(function(c) {
+          var btn = document.createElement('button');
+          btn.className = 'candidate';
+          btn.innerHTML = '<span>#' + c.rank + '</span><span>score=' + Number(c.score || 0).toFixed(2) + ' overlap=' + Number(c.overlap_ratio || 0).toFixed(2) + ' err=' + Number(c.mean_error_m || 0).toFixed(3) + '</span>';
+          btn.onmouseenter = function() { hoverPreview = c.preview_points || null; hoverPose = c.pose || null; drawCanvas(); };
+          btn.onmouseleave = function() { hoverPreview = null; hoverPose = null; drawCanvas(); };
+          btn.onclick = function() { acceptCandidate(c.rank); };
+          box.appendChild(btn);
+        });
+      }
+      function draw() {
+        drawCanvas();
+        if (!state) return;
+        drawCandidates(state.pending_candidates || ((state.last_match || {}).ambiguous ? (state.last_match || {}).candidates : []));
+        var st = state.status || {}, lm = state.last_match || {};
+        setStatus((state.name || '-') + ' #' + (st.snapshot_seq || 0) + ' 点=' + ((state.points||[]).length) + ' ' + (st.state || '') + ' overlap=' + ((lm.overlap_ratio || 0).toFixed(2)) + ' err=' + ((lm.mean_error_m || 0).toFixed(3)), st.state === 'match_failed');
+      }
+      function drawCanvas() {
+        ctx.clearRect(0,0,window.innerWidth,window.innerHeight);
+        drawGrid(); if (!state) return;
+        drawPoints(state.points, 'rgba(220,230,240,0.72)', 2);
+        drawPoints(hoverPreview || state.last_snapshot_preview, 'rgba(45,212,191,0.85)', 2);
+        (state.waypoints || []).forEach(function(w) {
+          var p = worldToScreen(w.x,w.y); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill(); ctx.fillText(w.name,p.x+8,p.y-8);
+        });
+        drawPose(hoverPose || state.current_pose || state.pose);
+      }
+      function poll() {
+        if (snapshotInFlight) return;
+        api('/api/map').then(function(data) { state = data; draw(); }).catch(function(){ setStatus('连接失败', true); });
+      }
+      canvas.addEventListener('wheel', function(e) { e.preventDefault(); scale *= e.deltaY < 0 ? 1.12 : 0.89; scale = Math.max(20, Math.min(360, scale)); draw(); }, {passive:false});
+      window.addEventListener('resize', resize);
+      document.addEventListener('visibilitychange', function() { if (document.hidden) stopAction(); });
+      resize(); poll(); setInterval(poll, 500);
+    })();
+  </script>
+</body>
+</html>

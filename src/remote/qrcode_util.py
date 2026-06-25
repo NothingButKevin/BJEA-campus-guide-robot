@@ -73,13 +73,13 @@ def _terminal_hyperlink(text: str, url: str) -> str:
     return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 
-def display_qr(url: str):
+def display_qr(url: str, title: str = "遥控模式", exit_hint: str = "按 'q' + Enter 退出遥控模式"):
     """生成二维码并打印终端信息（ASCII 码 + URL + PNG 路径）。"""
     border = "=" * 52
 
     print()
     print(border)
-    print("    BJEA 校园导览机器人 —— 遥控模式")
+    print(f"    BJEA 校园导览机器人 —— {title}")
     print()
     print(f"    在手机上打开此链接:")
     print(f"    {_terminal_hyperlink(url, url)}")
@@ -94,6 +94,6 @@ def display_qr(url: str):
         print(f"    或扫描二维码图片: file://{png_path.resolve()}")
         print()
 
-    print(f"    按 'q' + Enter 退出遥控模式")
+    print(f"    {exit_hint}")
     print(border)
     print()
